@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>TEST HTML PAGE.</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="{{ url_for('static', filename='test.css')}}">
+</head>
+
+<body>
+	<form name="pin" class="form" id="pin_form" action="#" method="post">
+	<h1>GPIO Web Interface</h1>
+	<p><input type="text" name="nme"></p>
+	<p><button id="add_pin_btn" name="add_btn" value="submit">Add Switch</button></p>
+	</form>
+	<table id="all_switches" style="border: 2px; border-color: blue; border-style: solid;">
+		<tr><th>Button</th><th>Name</th></tr>
+	</table>
+	<br>
+	<h3 id="status_bar"></h3>
+	<p></p>
+	<p id="status_backend"></p>
+	<form action="/load" class=form id="load_file" method="post">
+  <label for="files">Choose a file: </label>
+  <select id="file_select" name="files" id="files">
+	<option value=""></option>
+  </select>
+  <br><br>
+  <input name="load" type="submit" value="Load">
+</form>
+<form action="/load" class=form name="save" id="save_file"  method="post">
+<p> Enter filename!<input name="file_name" type="text"/><button name="save" value="save">Save</button></p>
+</form>
+	<button id="reset_btn" name="reset" value="reset">Reset</button>
+
+</body>
+<script>
+let actions = ["#", "/load", "/load"]
+let myForms = document.querySelectorAll(".form")
+myForms.forEach((form, i)=> {
+	form.addEventListener("submit", event => {
+	event.preventDefault();
+	formData = new FormData(form)
+	formData.append(event.submitter["name"], event.submitter["value"])
+	console.log(formData)
+	fetch(actions[i], {
+		method : "POST",
+		body : formData
+	})
+})
+})
+let selectFile = document.getElementById("file_select")
+let status = document.getElementById("status_bar")
+let statusBackend = document.getElementById("status_backend")
+let resetBtn = document.getElementById("reset_btn")
+resetBtn.addEventListener("click", event => {
+	formData = new FormData();
+	formData.append("reset", "submit")
+	fetch("/reset", {
+		method : "POST",
+		body : formData
+	})
+})
+let testFile = document.createElement("option")
+let statusBar = '';
+function switchAction(event){
+		formData = new FormData()
+		formData.append("switch", event.currentTarget["name"])
+		formData.append("action", event.target.checked == true? "ON" : "OFF" )
+		statusBar = `Switch: ${event.currentTarget["name"]} is ${event.target.checked == true? "ON" : "OFF"}`
+		fetch("/action", {
+			method : "POST",
+			body : formData
+		})
+}
+myStream = new EventSource("/stream");
+let newData = {};
+myStream.addEventListener("message", processData);
+let switchCount = 0;
+let fileCount = 0;
+let switches = [];
+let allSwitches = document.getElementById("all_switches")
+let oldData;
+function processData(data) {
+	if (data.data == "close") {
+		data.close();
+	} else {
+		if (data.data != oldData) {
+			newData = JSON.parse(data.data)
+			if (switchCount !== Array.from(Object.keys(newData.switch)).length) {
+				if (Array.from(Object.keys(newData.switch)).length == 0){
+					while (allSwitches.firstChild){
+						allSwitches.removeChild(allSwitches.lastChild)
+					}
+					statusBar = "All switches removed"
+				}
+				for (let [key, val] of Object.entries(newData.switch)){
+					console.log("Run")
+					console.log(newData.switch)
+					if (!switches.includes(key)) {
+						statusBar = "";
+						tableRow = document.createElement("tr")
+						tableData1 = document.createElement("td")
+						tableData2 = document.createElement("td")
+						newForm = document.createElement("form")
+						newForm.setAttribute("class", "form")
+						newForm.setAttribute("id", `sw_${key}`)
+						newForm.setAttribute("action", "#")
+						newLabel = document.createElement("label")
+						newLabel.setAttribute("class", "switch")
+						newInput = document.createElement("input")
+						newInput.setAttribute("name", key)
+						newInput.setAttribute("type", "checkbox")
+						if (val == "ON"){
+							newInput.setAttribute("checked", true)
+						} else if (val == "OFF") {
+							newInput.removeAttribute("checked")
+						}
+						newInput.addEventListener("change", switchAction)
+						newSpan = document.createElement("span")
+						newSpan.setAttribute("class", "slider round")
+						newLabel.appendChild(newInput)
+						newLabel.appendChild(newSpan)
+						newForm.appendChild(newLabel)
+						newSwPos = document.createElement("h3")
+						newSwPos.innerText  = `Switch ${key}`
+						allSwitches.appendChild(tableRow)
+						tableData1.appendChild(newForm)
+						tableData2.appendChild(newSwPos)
+						tableRow.appendChild(tableData1)
+						tableRow.appendChild(tableData2)
+					}
+				}
+			} 
+			switchCount = Array.from(Object.keys(newData.switch)).length;
+			switches = Array.from(Object.keys(newData.switch));
+			status.innerText = statusBar;
+			statusBackend.innerText = newData.message.status
+			if (fileCount !== newData.files.length) {
+				for (let i of newData.files) {
+					let newOption = document.createElement("option")
+					newOption.setAttribute("value", i)
+					newOption.innerText = i
+					selectFile.appendChild(newOption)
+					console.log(i)
+				}
+			}
+			fileCount = newData.files.length;
+			console.log(newData.switch)
+		}
+	oldData = data.data;
+	}
+}
+
+</script>
+
+</html>

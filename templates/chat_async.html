@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <style>
+.in_frame {
+width: 340px;
+height: 80px;
+padding-top: 0px;
+padding-left: 0px;
+margin-top: 0px;
+margin-left: 0px;
+background-color: rgb(247, 175, 41);
+}
+.out_frame {
+word-wrap: normal;
+width: 340px;
+height: 480px;
+background-color: aqua;
+}
+.users_frame {
+    width: 120px;
+    height: 580px;
+    background-color: azure;
+}
+        </style>
+
+    </head>
+    <body>
+        <form action="/add_user" id="addUserForm" method="POST">
+               <p>Please enter User ID: <input type="text" name="user_id" autocomplete="off"/></p>
+                <p><input type="submit" name="add_user" value="Submit"/></p>
+            </form>
+            <p id="status_bar"></p>
+    </body>
+<script>
+const newHtml = `<html>
+<head>
+<style>
+.in_frame {
+width: 340px;
+height: 80px;
+padding-top: 0px;
+padding-left: 0px;
+margin-top: 0px;
+margin-left: 0px;
+background-color: rgb(247, 175, 41);
+}
+.out_frame {
+word-wrap: normal;
+width: 340px;
+height: 480px;
+background-color: aqua;
+}
+.users_frame {
+    width: 120px;
+    height: 580px;
+    background-color: azure;
+}
+</style>
+<table>
+<tr>
+<td><iframe src="/users" id="users" class="users_frame"></iframe></td>
+<td><p><iframe src="/output" id="output" class="out_frame"></iframe></p>
+<p><iframe class="in_frame" src="/input" id="input" title="input"></iframe></p></td>
+</tr>
+</table>
+<p id="status_bar"></p>`
+   
+const ipAddr = "http://127.0.0.1:8080"
+const sock_ip = "ws://127.0.0.1:7890"
+let loaded = false;
+let sessionID = ""
+let USERID = ""
+let usersIframe
+let inputIframe
+let outputIframe
+const socket = new WebSocket(sock_ip)
+let status_bar = document.getElementById("status_bar")
+const addUserForm = document.getElementById("addUserForm")
+addUserForm.addEventListener("submit", event =>{
+    event.preventDefault()
+    let output = {}
+    output._id = sessionID
+    output.chat = {"login" : event.target.user_id.value, "user_id" : event.target.user_id.value}
+    socket.send(JSON.stringify(output))
+})
+
+let new_data = ''
+status_bar.innerHTML = "{{session['val'] if session['val'] else ''}}"
+socket.addEventListener("message", event => {
+    let main_data = JSON.parse(event.data);
+    console.log(main_data)
+    if (main_data.You == sessionID) {
+        socket.close()
+    } else if ("ID" in main_data) {
+        sessionID = main_data.ID;
+        console.log(sessionID)
+    } else if ("server" in main_data) {
+        console.log(main_data.server);
+    } else {
+        console.log("-----")
+        console.log(main_data.chat.user_id)
+        console.log(main_data.chat)
+        
+        if ("user_id" in main_data.chat){
+            USERID = main_data.chat.user_id
+            
+        }
+        console.log(USERID)
+        console.log("------")
+        console.log(`Main Data ${main_data.chat}`)
+        let main_data_out = main_data.chat
+        if ("users" in main_data_out && !loaded){
+            document.body.innerHTML = newHtml
+            usersIframe = document.getElementById("users")
+            inputIframe = document.getElementById("input")
+            outputIframe = document.getElementById("output") 
+            console.log(main_data_out.users) 
+            setTimeout(()=>{
+                usersIframe.contentWindow.postMessage(JSON.stringify(main_data_out), ipAddr);
+                outputIframe.contentWindow.postMessage(JSON.stringify(main_data_out), ipAddr);
+            }, 100)
+            loaded = true; 
+        } else if ("timestamp" in main_data_out){
+            setTimeout(() =>{
+               outputIframe.contentWindow.postMessage(JSON.stringify(main_data_out), ipAddr);
+            },250)
+        } else {
+            if (loaded) {
+                console.log(`Own user ID: ${USERID}`)
+                usersIframe.contentWindow.postMessage(JSON.stringify(main_data_out), ipAddr);
+                main_data_out.own_id = USERID
+                outputIframe.contentWindow.postMessage(JSON.stringify(main_data_out), ipAddr);
+            }   
+        }
+    }
+})
+window.onmessage = (event) => {
+if (event.data === "closed") {
+    console.log("Close received")
+    const windowFeatures = "left=100,top=100,width=320,height=320";
+    let u_id = "{{ session['user_id']}}";
+    console.log(u_id)
+    logout()
+    window.open("/add_user", "logout", windowFeatures);
+} else if ("message" in JSON.parse(event.data)){
+    output = {}
+    output._id = sessionID
+    output.chat = {user_id :USERID}
+    output.chat.message = JSON.parse(event.data).message
+    socket.send(JSON.stringify(output))
+    } 
+
+}
+window.addEventListener("load", event=>{
+    setTimeout(()=>{
+        sendMsg({"init": 0});
+    }, 250)
+    
+    console.log("loaded page")
+            
+        })
+window.addEventListener("beforeunload", event =>{
+    event.preventDefault();
+    logout()
+})
+function sendMsg(msg) {
+    socket.send(JSON.stringify(msg))
+    
+}
+function logout() {
+    output = {}
+    output._id = sessionID
+    console.log(USERID)
+    output.chat = {"logout": "TEST", "user_id" : USERID}
+    socket.send(JSON.stringify(output))
+    socket.close()
+    window.removeEventListener("beforeunload", logout)
+    window.close()
+}
+            
+        </script>
+</html>

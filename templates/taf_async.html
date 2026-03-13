@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <!--Comment-->
+        <title>TAF</title>
+        <style>
+            .button {
+                background-color: rgb(37, 218, 85);
+                color: black;
+                border:blue
+                
+            }
+            table, th, td {
+                border-color: blue;
+                border: 1px solid magenta;
+            
+            }
+            
+        </style>
+    </head>
+    <body>
+        <table id="display" class="table">
+        </table>
+    </body>
+    <script>
+const ipAddr = "http://127.0.0.1:8080"
+let oldData;display = document.getElementById("display") //main table
+window.addEventListener("message", event => {
+    if (event.origin !== ipAddr) {
+            alert("Security Breach ! ! !")
+        } else {
+        main_data = JSON.parse(event.data)
+        console.log(main_data)
+        for (let[key, val] of Object.entries(main_data)){
+            console.log(key)
+            console.log(val)
+            let formatedTafData = val.split(" ")
+            let outputTafData = [];
+            let count = 0
+            formatedTafData.forEach((el, i) =>{
+                if (count < 2) {
+                    if (!outputTafData[0]){
+                        outputTafData[0] = "";
+                    }
+                    outputTafData[0] += el + " ";
+                    count++
+                } else {
+                    if (el.includes("FM") || (el.includes("TEMPO") || (el.includes("PROB"))))  {
+                        count++
+                        if (!outputTafData[count]){
+                            outputTafData[count] = "";
+                        }
+                        outputTafData[count] += el + " ";
+                    } else {
+                        if (!outputTafData[count]){
+                            outputTafData[count] = "";
+                        }
+                        outputTafData[count] += el + " ";
+                    } 
+                }      
+            });
+            outputTafData.forEach(el =>{
+                console.log(el)
+            })
+            let newElRow = document.createElement("tr")
+            let newElTd = [];
+            for (let i=0; i<2; i++) {
+                let newElData = document.createElement("td")
+                newElData.setAttribute("class", "table_data")
+                newElTd.push(newElData)
+                newElRow.appendChild(newElData)
+            }
+            newElTd[0].innerHTML = `${key}`
+            outputTafData.forEach(el =>{
+                let newLine =  document.createElement("div")
+                newLine.innerText = el
+                newElTd[1].appendChild(newLine)
+            display.appendChild(newElRow)
+            })
+        }
+    }       //event.source.postMessage(formData, event.origin)
+        oldData = JSON.stringify(event.data)
+})
+
+    </script>

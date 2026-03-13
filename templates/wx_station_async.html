@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+ <link rel="stylesheet"  href="{{ url_for('static', filename='wx_station.css')}}"/>
+    </head>
+    <body>
+        <h2 id="top_label"></h2>
+
+<div class="row">
+  <div class="column" style="background-color:#cfcbcb;">
+    <h2>Wind</h2><br><br>
+    <p><div class="compass">
+  <div class="direction">
+    <p id="wind_direction"></p><br>
+  </div>
+  <div id="wind_arrow"></div>
+</div></p>
+  </div>
+  <div class="column" style="background-color:#e6d1d1;">
+    <h2 id="wx_details">Wx Details</h2>
+    <p id="wx_image"></p>
+    <p id="time"></p>
+  </div>
+  <div class="column" style="background-color:#a5a3a3;">
+    <h2>Wx Details</h2>
+    <table>
+        <tr><th><h3 style="margin-top: -30px;">Temp</h3></th><th><h3 style="margin-top: -30px">Dew Point</h3></th></tr>
+        <tr><td>
+        <div class="gauge" id="temp_gauge" style="--value:0.3; --color:lime; font-size:2rem;">30%</div>
+        </td><td>
+        <div class="gauge" id="dew_point" style="--value:0.3; --color:lime; font-size:2rem;">30%</div>   
+        </td></tr>
+      </table>
+      <div id="rh_disp"></div>
+      <div id="rh_meter"></div>
+      <div id="pressure"></div>
+      <div id="ceiling"></div>
+      <div id="rise_set"></div>
+</p>
+  </div>
+</div>  <div id="chat_btn_div"></div>
+        <form id="getWx" action="/get_wx" method="POST">
+            <p>Enter Zip Code:<input type="text" name=textData value="{{session['zip'] if 'zip' in session else ''}}" name="zip"/></p>
+        <input type="submit" class="button" id="btn" value="Get Wx Data"/>
+        </form>
+        <p id="head_1"></p>
+        <p id="test"></p>
+
+    </body>
+    <script>
+//sets attributes of the Chat button.
+const ipAddr = "http://127.0.0.1:8080"
+const sock_ip = "ws://127.0.0.1:7890"
+let sessionID = ""
+const socket = new WebSocket(sock_ip)
+const btn_attr = {"class": "button", "type": "submit", "name": "submit", "value": "chat", }
+let chat_btn_div = document.getElementById("chat_btn_div")
+let chat_btn = document.createElement("button")
+let metarBtn = document.createElement("button")
+let timeData = document.getElementById("time")
+chat_btn.innerText = "Chat"
+metarBtn.innerText="METAR"
+let metarWindow;
+let tafWindow;
+chat_btn_div.appendChild(chat_btn)
+chat_btn_div.appendChild(metarBtn)
+for (let [key, val] of Object.entries(btn_attr)) {
+    chat_btn.setAttribute(key, val)
+}
+chat_btn.addEventListener("click", event => {
+  window.open('/chat','Chat Box','width=500,height=620');
+})
+metarBtn.addEventListener("click", event =>{
+  metarWindow = window.open("/metar", "METAR", "width=600,height=600")
+})
+let getWx = document.getElementById("getWx") //just testing manipulating formdata
+getWx.addEventListener("formdata", event =>{
+  console.log(event.formData)
+})
+getWx.addEventListener("submit", event => {
+    let output = {};
+    formData = new FormData(event.target)
+    event.preventDefault();
+    output.zip = event.target.textData.value;
+    output._id = sessionID
+    console.log(JSON.stringify(output))
+    socket.send(JSON.stringify(output))
+    console.log(output)
+  })
+  
+zip = "{{ session['zip']}}" 
+let button = document.getElementById("btn")
+if (zip != "None")  {
+    button.classList.remove("button")
+    button.classList.add("button2")
+    
+}
+let tempVal;
+let dewVal;
+const temp = document.getElementById("temp_gauge");
+const dew = document.getElementById("dew_point")
+const rh = document.getElementById("rh_disp")
+const rhBar = document.createElement("h2")
+const rhBarMeter = document.getElementById("rh_meter")
+const windDir = document.getElementById("wind_direction")
+const windArrow = document.getElementById("wind_arrow")
+const windSpeed = document.createElement("span")
+const windGust = document.createElement("span")
+const wxDetails = document.getElementById("wx_details")
+const wxDetailsData = document.createElement("h1")
+const wxImg = document.getElementById("wx_image")
+const pressure = document.getElementById("pressure")
+const ceiling = document.getElementById("ceiling")
+const ceilingData = document.createElement("h3")
+const baro = document.createElement("h3")
+const riseSet = document.getElementById("rise_set")
+const riseSetData = document.createElement("h3")
+const topLabel = document.getElementById("top_label")
+image = new Image(400, 400)
+let main_data = {};
+
+
+socket.addEventListener("message", event => {
+main_data = JSON.parse(event.data)
+console.log(main_data)
+if (main_data.You == sessionID) {
+    socket.close()
+} else if ("ID" in main_data) {
+    sessionID = main_data.ID;
+    console.log(sessionID)
+} else {
+    let time;
+    if ("time" in main_data){
+      time = main_data.time;
+      timeData.innerText = time;
+    }
+    if ("wx" in main_data){
+      main_data = main_data.wx
+      topLabel.innerText = `Weather Station (${main_data.city? main_data.city:"Enter Zip Code"})`
+      tempVal = (main_data.temp * 1.8) + 32;
+      dewVal = main_data.dew_point_f;
+      rhBar.innerText = main_data.humid != null? "Relative Humidity: " + main_data.humid + " %" : "Relative Humidity: " + 0 + " %";
+      rhBarMeter.innerHTML = '<p><meter value=' + main_data.humid + ' min="0" max="100" low="40" high="80" optimum ="60" ></meter></p>';
+      windDir.innerText = main_data.compass? main_data.compass : "";
+      windDir.setAttribute("style", "font-size: 100px")
+      windArrow.setAttribute("class", `arrow ${main_data.compass? main_data.compass.toLowerCase() : '' }`)
+      windSpeed.innerText = main_data.wind_speed > 0?  main_data.wind_speed + " Mph" : 'Calm';
+      if (main_data.gust > 10){
+      windGust.innerText = main_data.gust? "G: "  + main_data.gust + " Mph" : "";
+      windGust.setAttribute("style", "font-size: 50px")
+      } else {
+      windGust.innerText = "";
+      }
+      windSpeed.setAttribute("style", "font-size: 75px")
+      windDir.appendChild(windSpeed)
+      windDir.appendChild(windGust)
+      rh.appendChild(rhBar)
+      pressVal = main_data.press / 33.8639
+      baro.innerText = `Baro: ${pressVal.toFixed(2)} inHg`
+      pressure.appendChild(baro)
+      let tempDescData = [];
+      let descDataIn = main_data.desc.split(" ")
+      descDataIn.forEach(item =>{
+      tempDescData.push(item[0].toUpperCase() + item.slice(1,item.length))
+      })
+      wxDetailsData.innerText = tempDescData.join(" ")
+      wxDetailsData.setAttribute("style", "margin-top: -30px")
+      wxDetails.appendChild(wxDetailsData)
+      wxImg.appendChild(image)
+      ceilingData.innerHTML = `Cloud Cover: ${main_data.ceiling}%`
+      ceiling.appendChild(ceilingData)
+      riseSetData.innerText = `Sunrise: ${main_data.sunrise} Am - Sunset: ${main_data.sunset} Pm`
+      riseSet.appendChild(riseSetData)
+      switch (main_data.wx){
+      case "Smoke":
+          image.src = '{{ url_for("static", filename="mist.png") }}'
+          break;
+      case "Clear":
+          if  (main_data.now.slice(11,19) > main_data.sunset | main_data.now.slice(11,19) < main_data.sunrise){
+          image.src = '{{ url_for("static", filename="clear_night.png") }}'
+          } else {
+          image.src = '{{ url_for("static", filename="sunny_day.png") }}'
+          }
+          break;
+      case "Clouds":
+          switch (main_data.desc){
+          case "few clouds":
+              if (main_data.now.slice(11,19) > main_data.sunset | main_data.now.slice(11,19) < main_data.sunrise){
+              image.src = '{{ url_for("static", filename="partly_cloudy_night.png") }}'  //needs to be updated
+              } else {
+              image.src = '{{ url_for("static", filename="partly_cloudy_day.png") }}'
+              }
+              break;
+          case "scattered clouds":
+              if (main_data.now.slice(11,19) > main_data.sunset | main_data.now.slice(11,19) < main_data.sunrise){
+              image.src = '{{ url_for("static", filename="partly_cloudy_night.png") }}'
+              } else {
+              image.src = '{{ url_for("static", filename="partly_cloudy_day.png") }}'
+              }
+              break;
+          case "broken clouds":
+              image.src = '{{ url_for("static", filename="cloudy.png") }}'
+              break;
+          case "overcast clouds":
+              image.src = '{{ url_for("static", filename="cloudy.png") }}'
+              break;
+          }
+          break;
+      case "Rain":
+          image.src = '{{ url_for("static", filename="rain.png") }}'
+          break;
+      case "Thunderstorm":
+          image.src = '{{ url_for("static", filename="thunderstorm.png") }}'
+          break;
+      case "Mist":
+          image.src = '{{ url_for("static", filename="mist.png") }}'
+          break;
+      case "Fog":
+        image.src = '{{ url_for("static", filename="mist.png") }}'
+        break;
+      case "Snow":
+          image.src = '{{ url_for("static", filename="snow.png") }}'
+          break;
+        }
+      } 
+  }
+})
+
+window.addEventListener("load", event=>{
+    setTimeout(()=>{
+        sendMsg({"init": 0});
+    }, 250)
+    
+    console.log("loaded page")
+            
+        })
+function sendMsg(msg) {
+    socket.send(JSON.stringify(msg))
+    
+}
+setInterval(() => {
+  temp.style.setProperty("--value", tempVal / 120);
+  temp.innerHTML = Math.round(tempVal) + "&#176";
+  dew.style.setProperty("--value", dewVal / 120)
+  dew.innerHTML = Math.round(dewVal) + "&#176";
+}, 100);      
+ 
+    </script>
+</html>

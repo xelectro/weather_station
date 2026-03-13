@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <!--Comment-->
+        <title>Practice page</title>
+        <style>
+            .button {
+                background-color: rgb(37, 218, 85);
+                color: black;
+                border:blue
+                
+            }
+        </style>
+    </head>
+    <body>
+        <p id="metar"></p>
+        <form action="/" id="test_form" name="form">
+            Input:<input name="test_in" type="text"/>
+        
+        
+        <button class="button" name="btn_1" value="submit" id="my_button_1">Test 1 Button</button>
+        <button class="button" name="btn_2" value="submit" id="my_button_2">Test 2 Button</button>
+        <button class="button" name="btn_3" value="submit" id="my_button_3">Test 3 Button</button>
+        </form>
+            <p id="test"></p>
+        <script>
+            //This is a comment
+            /* multi line
+            comment 
+            */
+const windowFeatures = "left=100,top=100,width=320,height=320";
+//testWindow = window.open("/popup",windowFeatures)
+let output = document.querySelector("#test")
+window.addEventListener("message", event => {
+    console.log(event.data)
+    if (event.origin !== "http://127.0.0.1:8080") {
+        output.innerHTML = "<h1>Fake Data</h1>"
+    }else{
+        output.innerHTML = `<h1>${event.data.get("test_in")}</h1>`
+    }
+    })
+let wx_data = JSON.parse('{{ data | tojson | safe }}')
+console.log(typeof(wx_data))
+const metar = document.getElementById("metar")
+for (let [key, val] of Object.entries(wx_data)){
+    if (key == "clouds") {
+        console.log(val)
+        val.forEach(i => {
+            console.log(i)
+            for (let [key1,val1] of Object.entries(i)) {
+                let line1 = document.createElement("li")
+                line1.innerText = `${key1} : ${val1}` 
+                metar.appendChild(line1)
+            }
+        })
+    } else {
+        let line = document.createElement("li")
+        line.innerText = `${key} : ${val}`
+        metar.appendChild(line)
+    }
+    
+    
+}
+console.log(Date(wx_data.obsTime))
+//myFrame = document.getElementById("frame")
+//myFrame.contentWindow.postMessage("Fuck Test", "http://127.0.0.1:8080")
+let myForm = document.querySelector("#test_form")
+
+let myBtns = document.querySelectorAll(".button")
+myForm.addEventListener("submit", myFunc)
+function myFunc(event) {
+    formData = new FormData(event.target)
+    event.preventDefault()
+    console.log(event.submitter)
+    switch (event.submitter["id"]) {
+        case "my_button_1":
+            formData.set("test_in", formData.get("test_in") + " ALot")
+            testWindow.postMessage(formData.get("test_in"), "http://127.0.0.1:8080")
+            break
+    }
+for (let [key, val] of formData.entries()){
+    console.log(`Key: ${key}`)
+    console.log(`Val: ${val}`)
+    
+}
+}
+    myForm.addEventListener("formdata", event =>{
+    console.log(event.formData)
+    console.log(event.srcElement)
+    event.formData.set("test_in", event.formData.get("test_in") + " Sucks Dick")
+    event.formData.set("tune", "Submit")
+}) 
+
+
+
+        
+            
+        </script>
+    </body>
+</html>

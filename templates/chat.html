@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <style>
+.in_frame {
+width: 340px;
+height: 80px;
+padding-top: 0px;
+padding-left: 0px;
+margin-top: 0px;
+margin-left: 0px;
+background-color: rgb(247, 175, 41);
+}
+.out_frame {
+word-wrap: normal;
+width: 340px;
+height: 480px;
+background-color: aqua;
+}
+.users_frame {
+    width: 120px;
+    height: 580px;
+    background-color: azure;
+}
+        </style>
+
+    </head>
+    <body>
+        {% if userid == "none" %}
+        <form action="/chat" method="POST" enctype="multipart/form-data" >
+               <p>Please enter User ID: <input type="text" name="user_id" autocomplete="off"/></p>
+                <p><input type="submit" name="add_user" value="Submit"/></p>
+            </form>
+            <p id="status_bar"></p>
+        {% else %}
+        <table>
+            <tr>
+                <td><iframe src="/users" id="users" class="users_frame"></iframe></td>
+        <td><p><iframe src="/output" id="output" class="out_frame"></iframe></p>
+        <p><iframe class="in_frame" src="/input" id="input" title="input"></iframe></p></td>
+        </tr>
+        </table>
+        <p id="status_bar"></p>
+        </body>
+        {% endif %}
+        <script>
+            let usersIframe = document.getElementById("users")
+            let inputIframe = document.getElementById("input")
+            let outputIframe = document.getElementById("output")
+            let status_bar = document.getElementById("status_bar")
+            let new_data = '';
+            status_bar.innerHTML = "{{ val }}"
+            let u_id = "{{userid}}";
+            console.log(`USER ID from CHAT: ${u_id}`);
+            data_feed = new EventSource("/sse")
+            data_feed.onmessage = (e) => {
+            if (e.data == "close") {
+                data_feed.close()
+                console.log("Close called")
+            } else {
+                new_data = JSON.parse(e.data) // data received from the SSE server.est_send = () => 
+                usersIframe.contentWindow.postMessage(new_data, window.location.origin);
+                outputIframe.contentWindow.postMessage(new_data, window.location.origin);
+                }
+            }
+            setTimeout(()=> {
+                inputIframe.contentWindow.postMessage({"user_id":  u_id} , window.location.origin);
+                usersIframe.contentWindow.postMessage({"user_id" : u_id}, window.location.origin);
+                outputIframe.contentWindow.postMessage({"user_id" : u_id}, window.location.origin);
+            }, 250);
+            window.onmessage = (event) => {
+            if (event.data === "closed") {
+                console.log("Close received")
+                logout = true;
+                let form_data = new FormData;
+                form_data.append("logout", u_id)
+                fetch("/logout", {
+                    method: "POST",
+                    body: form_data,
+                }
+
+                )
+                const windowFeatures = "left=100,top=100,width=320,height=320";
+                console.log(u_id);
+                console.log(`Current users: ${Object.keys(new_data.users)}`)
+                window.open("/add_user", "logout", windowFeatures);
+                window.close();
+                
+            }
+        }
+            
+        </script>
+</html>

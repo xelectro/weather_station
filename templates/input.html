@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <style>
+textarea {
+    height: 40px;
+    width:  260px;
+    vertical-align: top;
+    padding-top: 0px;
+    margin-top: 0px;
+}
+.button {
+    width: 40px;
+    height: 40px;
+    color: rgb(242, 19, 19);
+    margin-top: 0px;
+}
+        </style>
+
+    </head>
+    <body>
+        <p>
+            <form id="main_form" action="/input" method="POST" enctype="multipart/form-data">
+                <textarea name="value" id="area" autocomplete="off"></textarea>
+                <input type="submit" id="send" class="button" name="submit" value="Send"/>
+            </form>
+        </p>
+    </body>
+    <script>
+        let main_form = document.getElementById("main_form");
+        let user_id;
+        window.onmessage = (e) => {
+            console.log(e.data);
+            console.log("EVENT from INPPUT");
+            user_id = e.data.user_id;
+        }
+        let send_btn = document.getElementById("area");
+        send_btn.focus()
+        send_btn.setSelectionRange(0,0)
+        send_btn.addEventListener("keypress", (event) => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            console.log(event)
+            console.log(user_id);
+            document.getElementById("send").click();
+            send_btn.value = "";
+             }
+        });
+        main_form.addEventListener("submit", e => {
+            e.preventDefault();
+            let form_data = new FormData(e.target);
+            form_data.append("user_id", user_id);
+            console.log(form_data);
+            fetch("/input", {
+                method: "POST",
+                body: form_data,
+            })
+
+        })
+        
+    </script>
+</html>

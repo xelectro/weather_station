@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+ <link rel="stylesheet"  href="/static/wx_station.css"/>
+    </head>
+    <body>
+      <div id="top-bar">
+  <form id="stock_form" action="/stock" method="POST" enctype="multipart/form-data">
+    <input name="symbol" type="text" placeholder="Stock Symbol">
+    <button type="submit" id="stock_btn" class="button">
+      Add Stock
+    </button>
+  </form>
+</div>
+<div class="row">
+  <div class="column" style="background-color:#cfcbcb;">
+    <h2>Wind</h2><br><br>
+    <p><div class="compass">
+  <div class="direction">
+    <p id="wind_direction"></p><br>
+  </div>
+  <div id="wind_arrow"></div>
+</div></p>
+  </div>
+  <div class="column" style="background-color:#e6d1d1;">
+    <h3 id="top_label"></h3>
+    <h3 id="wx_details">Wx Details</h3>
+    <p id="wx_image"></p>
+    <p id="time_now"></p>
+  </div>
+  <div class="column" style="background-color:#a5a3a3;">
+    <h2>Wx Details</h2>
+    <table class="table">
+        <tr><th><h3 style="margin-top: -30px;">Temp</h3></th><th><h3 style="margin-top: -30px">Dew Point</h3></th></tr>
+        <tr><td>
+        <div class="gauge" id="temp_gauge" style="--value:0.3; --color:lime; font-size:2rem;">30%</div>
+        </td><td>
+        <div class="gauge" id="dew_point" style="--value:0.3; --color:lime; font-size:2rem;">30%</div>   
+        </td></tr>
+      </table>
+      <div id="rh_disp"></div>
+      <div id="rh_meter"></div>
+      <div id="pressure"></div>
+      <div id="ceiling"></div>
+      <div id="rise_set"></div>
+</p>
+  </div>
+</div>  <div id="chat_btn_div"></div>
+        <form id="getWx" action="/get_wx" method="POST" enctype="multipart/form-data">
+            <p>Enter Zip Code:<input type="text" value="{{zip}}" name="zip"/></p>
+        <input type="submit" class="button" id="btn" value="Get Wx Data"/>
+        </form>
+        <p id="status"></p>
+
+    </body>
+    <script>
+//sets attributes of the Chat button.
+const btn_attr = {"class": "button", "type": "submit", "name": "submit", "value": "chat", }
+let stockForm = document.getElementById("stock_form")
+stockForm.addEventListener("submit", event => {
+  event.preventDefault();
+  let formData = new FormData(event.target);
+  fetch("/stock", {
+    method: "POST",
+    body: formData,
+  }
+  )
+})
+let stockRow = document.getElementById("top-bar");
+let chat_btn_div = document.getElementById("chat_btn_div")
+let chat_btn = document.createElement("button")
+let metarBtn = document.createElement("button")
+chat_btn.innerText = "Chat"
+metarBtn.innerText="METAR"
+let metarWindow;
+let tafWindow;
+chat_btn_div.appendChild(chat_btn)
+chat_btn_div.appendChild(metarBtn)
+for (let [key, val] of Object.entries(btn_attr)) {
+    chat_btn.setAttribute(key, val)
+}
+chat_btn.addEventListener("click", event => {
+  window.open('/chat','Chat Box','width=500,height=620');
+})
+metarBtn.addEventListener("click", event =>{
+  metarWindow = window.open("/metar", "METAR", "width=600,height=600")
+})
+window.addEventListener("message", event =>{
+  tafWindow =  window.open(`/taf/${event.data}`,'TAF','width=600,height=600')
+  console.log(event.source)
+  console.log(event.origin)
+  console.log(event.data)
+})
+let getWx = document.getElementById("getWx") //just testing manipulating formdata
+getWx.addEventListener("formdata", event =>{
+  console.log(event.formData)
+})
+getWx.addEventListener("submit", event => {
+  formData = new FormData(event.target)
+  event.preventDefault();
+  fetch("#", {
+    method: "POST",
+    body: formData
+  })
+})
+zip = "{{ zip }}" 
+let button = document.getElementById("btn")
+if (zip != "None")  {
+    button.classList.remove("button")
+    button.classList.add("button2")
+    
+}
+let tempVal;
+let dewVal;
+const status_bar = document.getElementById("status")
+const temp = document.getElementById("temp_gauge");
+const dew = document.getElementById("dew_point")
+const rh = document.getElementById("rh_disp")
+const rhBar = document.createElement("h2")
+const rhBarMeter = document.getElementById("rh_meter")
+const windDir = document.getElementById("wind_direction")
+const windArrow = document.getElementById("wind_arrow")
+const windSpeed = document.createElement("span")
+const windGust = document.createElement("span")
+const wxDetails = document.getElementById("wx_details")
+const wxDetailsData = document.createElement("h1")
+const wxImg = document.getElementById("wx_image")
+const pressure = document.getElementById("pressure")
+const ceiling = document.getElementById("ceiling")
+const ceilingData = document.createElement("h3")
+const baro = document.createElement("h3")
+const riseSet = document.getElementById("rise_set")
+const riseSetData = document.createElement("h3")
+const topLabel = document.getElementById("top_label")
+const time_now = document.getElementById("time_now");
+image = new Image(400, 400)
+let main_data = {};
+sse_stream = new EventSource("/sse")
+setTimeout(() =>{
+  sse_stream.onmessage = (event) => {
+    if (event.data == "close") {
+      event.close()
+    } else {
+      main_data = JSON.parse(event.data)
+      let metar_data = main_data.metar;
+      let stocks = main_data.stocks;
+      let oil = main_data.oil;
+      console.log(`OIL:${oil.price}`);
+      main_data = main_data.wx
+      if (metarWindow){
+        metarWindow.postMessage(metar_data, window.location.origin)
+      }
+      if (tafWindow) {
+        tafWindow.postMessage(metar_data, window.location.origin)
+      }
+      console.log(stocks);
+      while (stockRow.childNodes.length > 2) {
+        stockRow.removeChild(stockRow.lastChild);
+      }
+      let oil_price = {"symbol": "Oil", "price": oil.price, "change": oil.change_ammount,
+       "perc_chng": oil.change_percent, "time": oil.updated_at, "display": null};
+      stocks.unshift(oil_price);
+      stocks.forEach(stock => {
+        let arrow;
+        let field = document.createElement("div");
+        field.className = "top-block";
+        let symbol = document.createElement("p");
+        symbol.style.color = "blue";
+        let price = document.createElement("p");
+        price.style.color = "blue";
+        let changeEl = document.createElement("p");
+        let changePercent = document.createElement("p");
+        if (stock.change < 0) {
+          changeEl.style.color = "red";
+          changePercent.style.color = "red";
+          arrow = "▼";
+          
+        } else {
+          changeEl.style.color = "green";
+          changePercent.style.color = "green";
+          arrow = "▲";
+        }
+        symbol.innerText = stock.symbol;
+        price.innerText = `$${stock.price}`;
+        changeEl.innerText = `$${stock.change}  ${arrow}`;
+        changePercent.innerText = stock.perc_chng + "%";
+        field.appendChild(symbol);
+        field.appendChild(price);
+        field.appendChild(changeEl);
+        field.appendChild(changePercent);
+        stockRow.appendChild(field);
+      })
+
+
+      time_now.innerText = main_data.now;
+      status_bar.innerText = main_data.status;
+      topLabel.innerText = `Location: (${main_data.city? main_data.city:"Enter Zip Code"})`
+      tempVal = (main_data.temp * 1.8) + 32;
+      dewVal = main_data.dew_point_f;
+      rhBar.innerText = main_data.humid != null? "Relative Humidity: " + main_data.humid + " %" : "Relative Humidity: " + 0 + " %";
+      rhBarMeter.innerHTML = '<p><meter value=' + main_data.humid + ' min="0" max="100" low="40" high="80" optimum ="60" ></meter></p>';
+      windDir.innerText = main_data.compass? main_data.compass : "";
+      windDir.setAttribute("style", "font-size: 100px")
+      windArrow.setAttribute("class", `arrow ${main_data.compass? main_data.compass.toLowerCase() : '' }`)
+      windSpeed.innerText = main_data.wind_speed > 0?  main_data.wind_speed + " Mph" : 'Calm';
+      if (main_data.gust > 10){
+        windGust.innerText = main_data.gust? "G: "  + main_data.gust + " Mph" : "";
+        windGust.setAttribute("style", "font-size: 50px")
+      } else {
+        windGust.innerText = "";
+      }
+      windSpeed.setAttribute("style", "font-size: 75px")
+      windDir.appendChild(windSpeed)
+      windDir.appendChild(windGust)
+      rh.appendChild(rhBar)
+      pressVal = main_data.press / 33.8639
+      baro.innerText = `Baro: ${pressVal.toFixed(2)} inHg`
+      pressure.appendChild(baro)
+      let tempDescData = [];
+      let descDataIn = main_data.desc.split(" ")
+      descDataIn.forEach(item =>{
+        tempDescData.push(item[0].toUpperCase() + item.slice(1,item.length))
+      })
+      wxDetailsData.innerText = tempDescData.join(" ")
+      wxDetailsData.setAttribute("style", "margin-top: -30px")
+      wxDetails.appendChild(wxDetailsData)
+      wxImg.appendChild(image)
+      ceilingData.innerHTML = `Cloud Cover: ${main_data.ceiling}%`
+      ceiling.appendChild(ceilingData)
+      riseSetData.innerText = `Sunrise: ${main_data.sunrise} Am - Sunset: ${main_data.sunset} Pm`
+      riseSet.appendChild(riseSetData)
+      switch (main_data.wx){
+        case "Smoke":
+          image.src = "/static/mist.png"
+          break;
+        case "Clear":
+          if  (main_data.t_o_d == "night"){
+            image.src = "/static/clear_night.png"
+          } else {
+            image.src = "/static/sunny_day.png"
+          }
+          break;
+        case "Clouds":
+          switch (main_data.desc){
+            case "few clouds":
+              if (main_data.t_o_d == "night"){
+                image.src = "/static/partly_cloudy_night.png"
+              } else {
+                image.src = "/static/partly_cloudy_day.png"
+              }
+              break;
+            case "scattered clouds":
+              if (main_data.t_o_d == "night"){
+                image.src = "/static/partly_cloudy_night.png"
+              } else {
+                image.src = "/static/partly_cloudy_day.png"
+              }
+              break;
+            case "broken clouds":
+              image.src = "/static/cloudy.png"
+              break;
+            case "overcast clouds":
+              image.src = "/static/cloudy.png"
+              break;
+            }
+          break;
+        case "Rain":
+          image.src = "/static/rain.png"
+          break;
+        case "Thunderstorm":
+          image.src = "/static/thunderstorm.png"
+          break;
+        case "Mist":
+          image.src = "/static/mist.png"
+          break;
+        case "Snow":
+          image.src = "/static/snow.png"
+            break;
+      }
+    } 
+  }
+}, 500)
+setInterval(() => {
+  temp.style.setProperty("--value", tempVal / 120);
+  temp.innerHTML = Math.round(tempVal) + "&#176";
+  dew.style.setProperty("--value", dewVal / 120)
+  dew.innerHTML = Math.round(dewVal) + "&#176";
+}, 100);      
+ 
+    </script>
+</html>

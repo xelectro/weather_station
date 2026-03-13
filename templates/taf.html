@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <!--Comment-->
+        <title>TAF</title>
+        <style>
+            .button {
+                background-color: rgb(37, 218, 85);
+                color: black;
+                border:blue
+                
+            }
+            table, th, td {
+                border-color: blue;
+                border: 1px solid magenta;
+            
+            }
+            
+        </style>
+    </head>
+    <body>
+        <table id="display" class="table">
+        </table>
+    </body>
+    <script>
+        let oldData;
+        display = document.getElementById("display") //main table
+        const allowedOrigin = window.location.origin;
+        window.addEventListener("message", event => {
+            if (JSON.stringify(event.data) != oldData) {
+                if (event.origin === allowedOrigin) {
+                    while (display.firstChild){
+                            display.removeChild(display.lastChild)
+                        }
+                    let rowCount = 0;
+                    for (let[key, val] of Object.entries(event.data)){
+                        console.log(val)
+                        let newElRow = document.createElement("tr")
+                        let newElTd = [];
+                        for (let i=0; i<2; i++) {
+                            let newElData = document.createElement("td")
+                            newElData.setAttribute("class", "table_data")
+                            newElTd.push(newElData)
+                            newElRow.appendChild(newElData)
+                        }
+                        let output;
+                        newElTd[0].innerHTML = `${key}`
+                        let phrases = ["TEMPO", "FM", "PROB30", "PROB40"];
+                        output = taf_proc(val[1], phrases);
+                        newElTd[1].innerHTML = output.join(" ");
+                        display.appendChild(newElRow)
+                        rowCount++
+                        console.log(rowCount);
+                    }
+                    if (rowCount == 0) {
+                            window.close();
+                        }
+                    //event.source.postMessage(formData, event.origin)
+                } else {
+                    console.log("Not correct")
+                }
+                oldData = JSON.stringify(event.data)
+            }
+        })
+        function taf_proc(val, phrase) {
+            let output = [];
+            let arr = val.split(" ");
+            arr.forEach((element, i, ar ) => {
+                phrase.forEach(el =>{
+                    if (element.includes(el)) {
+                        ar[i] = "<div>" + element;
+                    }
+                })
+
+            });
+            return arr
+        }
+
+    </script>

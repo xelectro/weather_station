@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <!--Comment-->
+        <title>Practice page</title>
+        <style>
+            .button {
+                background-color: rgb(37, 218, 85);
+                color: black;
+                border:blue
+                
+            }
+            table, th, td {
+                border-color: blue;
+                border: 1px solid magenta;
+            
+            }
+            
+        </style>
+    </head>
+    <body>
+        <form id="metar_form">
+            ICAO Airport:<input type="text" name="ID"/>
+            <button class="button" name="submit_data" value="submit">Submit</button>
+            <button class="button" name="delete" value="delete">Delete</button>
+        </form>
+        <table id="display" class="table">
+        </table>
+    </body>
+    <script>
+        let oldData;
+        const metarForm = document.getElementById("metar_form")
+        metarForm.addEventListener("submit", event =>{
+            event.preventDefault();
+            console.log(event.submitter.name)
+            formData = new FormData();
+            if (event.submitter.name == "delete") {
+                formData.append("ID", "delete")
+            } else {
+                formData.append("ID", event.target.ID.value)
+            }
+            fetch("/metar", {
+                method: "POST",
+                body: formData
+            })
+        })
+        myBtn = document.getElementById("test_sub")
+        display = document.getElementById("display") //main table
+        const allowedOrigin = window.location.origin;
+        window.addEventListener("message", event => {
+            if (JSON.stringify(event.data) != oldData) {
+                if (event.origin === allowedOrigin){
+                    while (display.firstChild){
+                            display.removeChild(display.lastChild)
+                        }
+                    let header_row = document.createElement("tr");
+                    for (let i=0; i<3; i++) {
+                        let header_data = document.createElement("td");
+                        if (i == 0) {
+                            header_data.innerText = "Airport ID"
+                        } else if (i == 1) {
+                            header_data.innerText = "METAR"
+                        }
+                        header_data.setAttribute("class", "table_data");
+                        header_row.appendChild(header_data)
+                    }
+
+                    display.appendChild(header_row);
+                    let rowCount = 1;
+                    for (let[key, val] of Object.entries(event.data)){
+                        if (key == "ID") {
+                            continue;
+                        }
+                        let newElRow = document.createElement("tr")
+                        let newElTd = [];
+                        for (let i=0; i<3; i++) {
+                            let newElData = document.createElement("td")
+                            newElData.setAttribute("class", "table_data")
+                            newElTd.push(newElData)
+                            newElRow.appendChild(newElData)
+                        }
+                        newElTd[0].innerHTML = `${key}`
+                        newElTd[1].innerHTML = `${val[0]}`
+                        if (rowCount > 0){
+                            tafBtn = document.createElement("button");
+                            tafBtn.setAttribute("type", "submit")
+                            tafBtn.setAttribute("value", key)
+                            tafBtn.innerText = "TAF"
+                            tafBtn.addEventListener("click", e=>{
+                                console.log(e.target)
+                                console.log(e.target.value)
+                                event.source.postMessage(e.target.value, window.location.origin)
+                            })
+                            newElTd[2].appendChild(tafBtn)
+                        }
+                        display.appendChild(newElRow)
+                        rowCount++
+                    }
+                    //event.source.postMessage(formData, event.origin)
+                } else {
+                    console.log("Not correct")
+                }
+                oldData = JSON.stringify(event.data)
+            }
+        })
+
+    </script>

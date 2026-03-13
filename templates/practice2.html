@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <!--Comment-->
+        <title>Practice page</title>
+        <style>
+            .button {
+                background-color: rgb(37, 218, 85);
+                color: black;
+                border:blue
+                
+            }
+        </style>
+    </head>
+    <body>
+        TEST
+        <p id="display"></p>
+        <button id="test_sub", name="mybtn", value="submit">Submit</button>
+    </body>
+    <script>
+        myBtn = document.getElementById("test_sub")
+        display = document.getElementById("display")
+        newEl = document.createElement("li")
+        display.appendChild(newEl)
+        window.addEventListener("message", event => {
+            if (event.origin == "http://127.0.0.1:8080") {
+                console.log(event.source)
+                newEl.innerText = event.data
+                console.log(event.data)
+                console.log(event.origin)
+                formData = new FormData()
+                formData.append("test_in", event.data + ", Exactly and then some!!!")
+                myBtn.addEventListener("click", event2 => {
+                    event.source.postMessage(formData, event.origin)
+                })
+                
+            }else {
+                console.log("Not correct")
+            }
+        })
+
+    </script>

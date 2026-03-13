@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+    <head>
+
+
+    </head>
+    <style>
+.in_text {
+font-size: medium;
+color: blue;
+font-family: 'Times New Roman', Times, serif;
+}
+.out_text {
+font-size: medium;
+color: rgb(241, 12, 80);
+font-family: 'Times New Roman', Times, serif;
+}
+
+    </style>
+    <body><table>
+        <tr><td><p id ="users"></p></td>
+       <td> <p id="chat_window"></p></td>
+        </tr>
+     </table>
+        <script>
+        let chat = document.getElementById("chat_window")
+        let users = document.getElementById("users")
+        let chat_data = document.createElement("li")
+        let time = document.createElement("li")
+        let user_data = document.createElement("li")
+        let inSound = new Audio("/static/incoming.mp3")
+        let outSound = new Audio("/static/outgoing.mp3")
+        let new_data = {};
+        let lastMessageId = "";
+        let user_id;
+        chat.appendChild(time)
+        window.addEventListener("message", (event) => {
+        if (event.origin !== window.location.origin) {
+            alert("Security Breach ! ! !")
+        } else if ("user_id" in event.data) {
+            user_id = event.data.user_id;
+        } else {
+            new_data = event.data
+            time.textContent = new_data.now
+            if (new_data.display.message_id !== lastMessageId) {
+                if (new_data.display.data !== ""){
+                    chat_data = document.createElement("li")
+                    if (user_id == new_data.display.user) {
+                        chat_data.classList.add("out_text")
+                        chat_data.innerText = "You: " + new_data.display.data
+                        outSound.play()
+                    } else {
+                        chat_data.classList.add("in_text")
+                        chat_data.innerText = new_data.display.user + ": " + new_data.display.data
+                        inSound.play()
+                        }
+                    lastMessageId = new_data.display.message_id;
+                    chat.appendChild(chat_data);
+                    document.scrollingElement.scrollTop = document.scrollingElement.scrollHeight;
+                    }
+                }
+            }
+        })
+window.addEventListener("beforeunload", function(t){
+// Do something
+const windowFeatures = "left=100,top=100,width=320,height=320";
+window.open("/add_user", "logout", windowFeatures)
+});    
+
+
+
+
+
+        </script>
+    </body>
+</html>

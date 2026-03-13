@@ -1,0 +1,49 @@
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="{{ url_for('static', filename='rotary.css')}}">
+</head>
+<body>
+<form action="/" method="post">
+    <input name="start" type="submit" value="Start Meter" />
+</form>
+<p id="measure_count"></p>
+
+<br><br>
+<h2>Meter Position</h2>
+
+    <!-- Container for the meter and its components -->
+    <div class="meter-container">
+        <!-- Container for the meter reading lines -->
+        <div class="line-container">
+            <!-- Lines will be dynamically added here by JavaScript -->
+        </div>
+        <!-- The circular meter itself -->
+        <div class="meter" id="meter"></div>
+    </div>
+
+    <!-- Display for the current meter reading -->
+    <div class="meter-reading" id="meter-reading">0</div>
+    
+
+
+
+{% if session["measure_count"] %}
+<script src="{{url_for('static', filename='rotary.js')}}" type="text/javascript"></script>
+    
+
+{% endif %}
+
+<br><br><br><br><br><br>
+<form action="/display" method="post">
+   <p> Enter value: <input type="text" name="display_data"/></p>
+    <input name="display" type="submit" value="Display" />
+</form>
+
+
+<form action="/stop" method="post">
+    <input name="stop" type="submit" value="Stop" />
+</form>
+<p>Satatus Bar: {{session["val"]}}</p>
+</body>
+</html>

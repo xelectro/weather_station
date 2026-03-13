@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        
+    </head>
+    <body>
+        <form id="form">
+            Enter text: <input type="text" name="textData">
+            <button id="button" type="submit" name="submit" value="submit">Submit</button>
+        </form>
+        <button id="button2" type="submit", name="clear", value="clear">Clear</button>
+        <button id="button3" type="submit", name="close", value="close">Exit</button>
+
+        <p id="message"></p>
+
+    </body>
+    <script>
+        let sessionID = ""
+        let output = {};
+        const socket = new WebSocket('ws://127.0.0.1:7890')
+        const form = document.getElementById("form")
+        form.addEventListener("submit", event=>{
+            event.preventDefault();
+            output.message = event.target.textData.value
+            output._id = sessionID
+            console.log(JSON.stringify(output))
+            socket.send(JSON.stringify(output))
+            console.log(output)
+        })
+        const clearBtn = document.getElementById("button2")
+        clearBtn.addEventListener("click", event=>{
+            while (messageLine.firstChild) {
+                messageLine.removeChild(messageLine.lastChild)
+            }
+        })
+        const exitBtn = document.getElementById("button3")
+        exitBtn.addEventListener("click", event=>{
+            sendMsg({"close": 0})
+        })
+        const messageLine = document.getElementById("message")
+        socket.addEventListener("message", event=>{
+            let input = JSON.parse(event.data)
+            console.log(input)
+            for ([key, val] of Object.entries(input)) {
+                console.log(`${key} : ${val}`)
+            console.log(input.You)
+            }
+            if (input.You == sessionID) {
+                socket.close();
+            } else {
+                const li = document.createElement('li')
+                if ("You" in input) {
+                    li.setAttribute("style", "color: blue")
+                    li.innerText = input.You
+                } else if ("Other" in input) {
+                    li.setAttribute("style", "color: magenta")
+                    li.innerText = input.Other
+                } else if ("ID" in input) {
+                    sessionID = input.ID;
+                    console.log(sessionID)
+                }
+                
+                messageLine.appendChild(li)
+            }
+        })
+        
+        messageLine.innerText = "TEST"
+        window.addEventListener("beforeunload", event=>{
+            event.preventDefault();
+            sendMsg({"close": 0});
+            window.removeEventListener("beforeunload",()=>{
+                console.log("Removed")
+                sendMsg({"close": 0})
+            })
+        })
+        window.addEventListener("load", event=>{
+            setTimeout(()=>{
+                sendMsg({"init": 0});
+            }, 250)
+            
+            console.log("loaded page")
+            
+        })
+function sendMsg(msg) {
+    socket.send(JSON.stringify(msg))
+    
+}
+
+
+    </script>
+</html>
