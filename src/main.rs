@@ -28,8 +28,9 @@ use chrono::{self, Local, TimeZone};
 pub mod web;
 pub mod stocks;
 pub mod oil;
-use web::{AppState, AviationEntry, AviationSocketRequest, AviationSocketResponse, ChatBootstrap, ChatClientMessage, ChatEvent, SseData, WsOutput};
+use web::{AppState, AviationEntry, AviationSocketRequest, AviationSocketResponse, BuoyObservation, ChatBootstrap, ChatClientMessage, ChatEvent, SseData, WsOutput};
 use stocks::Stock;
+use anyhow::anyhow;
 use uuid;
 use lettre::{Message, SmtpTransport, Transport};
 use anyhow::Result;
@@ -530,6 +531,7 @@ async fn aquire_data(state: Arc<Mutex<AppState>>) -> Result<()> {
     let mut now = Instant::now() - Duration::from_secs(60);
     let mut now2 = Instant::now() - Duration::from_hours(1);
     let mut now3 = Instant::now() - Duration::from_mins(5);
+    let mut now4 = Instant::now() - Duration::from_mins(15);
     let mut ip = String::new();
     let mut old_ip = String::new();
     loop {
@@ -544,24 +546,40 @@ async fn aquire_data(state: Arc<Mutex<AppState>>) -> Result<()> {
         if now.elapsed() >= Duration::from_secs(60) {
             get_wx(state.clone()).await;
             now = Instant::now();
-            ip = update_ip(&old_ip).await?;
-            old_ip = ip.clone();
+            match update_ip(&old_ip).await {
+                Ok(new_ip) => {
+                    ip = new_ip;
+                    old_ip = ip.clone();
+                }
+                Err(error) => println!("Failed to update IP: {}", error),
+            }
             println!("Attempted getting Wx");
         }
         if now2.elapsed() >= Duration::from_hours(1) {
             let mut oil_lck = oil_arc.lock().await;
             for x in oil_lck.iter_mut() {
-                x.update().await?;
+                if let Err(error) = x.update().await {
+                    println!("Failed to update oil price: {}", error);
+                }
             }
             now2 = Instant::now();
             println!("Attempted to update oil price!");
         }
         if now3.elapsed() >= Duration::from_mins(5) {
-            updater(stocks_arc.clone()).await?;
+            if let Err(error) = updater(stocks_arc.clone()).await {
+                println!("Failed to update stocks: {}", error);
+            }
             now3 = Instant::now();
             println!("Attempted to update stocks");
         }
-        let (sender, display, users, wx, metar, taf, status) = {
+        if now4.elapsed() >= Duration::from_mins(15) {
+            if let Err(error) = update_buoy_data(state.clone()).await {
+                println!("Failed to update buoy data: {}", error);
+            }
+            now4 = Instant::now();
+            println!("Attempted to update NOAA buoy data");
+        }
+        let (sender, display, users, wx, metar, taf, status, buoy) = {
             let mut state_lck = state.lock().await;
             state_lck.ip = ip.clone();
             state_lck.wx.entry("now".to_string()).insert_entry(Local::now().format("%A, %B %-d, %Y at %-H:%M:%S").to_string());
@@ -574,6 +592,7 @@ async fn aquire_data(state: Arc<Mutex<AppState>>) -> Result<()> {
                 state_lck.metar.clone(),
                 state_lck.taf.clone(),
                 state_lck.status.clone(),
+                state_lck.buoy.clone(),
             )
         };
         sse_output.now = Local::now().format("%B %-d, %Y - %-H:%M:%S").to_string();
@@ -597,9 +616,138 @@ async fn aquire_data(state: Arc<Mutex<AppState>>) -> Result<()> {
         if oil_guard.len() > 1 {
             sse_output.oil2 = oil_guard[1].display();
         }
+        sse_output.buoy = buoy;
         sse_output.status = status;
         let _ = sender.send(serde_json::to_string(&sse_output).unwrap_or_else(|_| "JSON ERROR".to_string()));
         interval.tick().await;
+    }
+}
+
+async fn update_buoy_data(app_state: Arc<Mutex<AppState>>) -> Result<()> {
+    let station = "41112";
+    let addr = format!("https://www.ndbc.noaa.gov/data/realtime2/{station}.txt");
+    let client = reqwest::Client::new();
+    let body = client.get(addr).send().await?.text().await?;
+    let mut observation = parse_buoy_observation(station, &body)?;
+    if let Ok(flag_body) = client
+        .get("https://safebeachday.com/fernandina-city/")
+        .send()
+        .await?
+        .text()
+        .await
+    {
+        observation.beach_flag = parse_fernandina_beach_flag(&flag_body);
+    }
+    app_state.lock().await.buoy = observation;
+    Ok(())
+}
+
+fn parse_buoy_observation(station: &str, body: &str) -> Result<BuoyObservation> {
+    let mut lines = body.lines().filter(|line| !line.trim().is_empty());
+    let header_line = lines.next().ok_or_else(|| anyhow!("missing buoy header line"))?;
+    let _units_line = lines.next().ok_or_else(|| anyhow!("missing buoy units line"))?;
+    let data_line = lines.next().ok_or_else(|| anyhow!("missing buoy data line"))?;
+
+    let headers: Vec<&str> = header_line.split_whitespace().collect();
+    let values: Vec<&str> = data_line.split_whitespace().collect();
+    if headers.len() != values.len() {
+        return Err(anyhow!("buoy feed column mismatch"));
+    }
+
+    let columns: HashMap<&str, &str> = headers.into_iter().zip(values).collect();
+    let timestamp: [Option<&str>; 5] = [
+        columns.get("#YY").copied(),
+        columns.get("MM").copied(),
+        columns.get("DD").copied(),
+        columns.get("hh").copied(),
+        columns.get("mm").copied(),
+    ];
+
+    Ok(BuoyObservation {
+        station: station.to_string(),
+        wave_height_ft: normalize_buoy_wave_height(columns.get("WVHT").copied()),
+        interval_sec: normalize_buoy_value(columns.get("DPD").copied(), Some("s")),
+        water_temp_f: normalize_buoy_temperature(columns.get("WTMP").copied()),
+        air_temp_f: normalize_buoy_temperature(columns.get("ATMP").copied()),
+        beach_flag: None,
+        updated_at: if timestamp.iter().all(|part| part.is_some()) {
+            Some(format!(
+                "{}-{}-{} {}:{} UTC",
+                timestamp[0].unwrap_or(&""),
+                timestamp[1].unwrap_or(&""),
+                timestamp[2].unwrap_or(&""),
+                timestamp[3].unwrap_or(&""),
+                timestamp[4].unwrap_or(&"")
+            ))
+        } else {
+            None
+        },
+    })
+}
+
+fn normalize_buoy_value(value: Option<&str>, suffix: Option<&str>) -> Option<String> {
+    let raw = value?.trim();
+    if raw.is_empty() || raw == "MM" {
+        return None;
+    }
+    Some(match suffix {
+        Some(unit) => format!("{raw} {unit}"),
+        None => raw.to_string(),
+    })
+}
+
+fn normalize_buoy_temperature(value: Option<&str>) -> Option<String> {
+    let raw = value?.trim();
+    if raw.is_empty() || raw == "MM" {
+        return None;
+    }
+    let celsius = raw.parse::<f64>().ok()?;
+    let fahrenheit = (celsius * 1.8) + 32.0;
+    Some(format!("{:.1} F", fahrenheit))
+}
+
+fn normalize_buoy_wave_height(value: Option<&str>) -> Option<String> {
+    let raw = value?.trim();
+    if raw.is_empty() || raw == "MM" {
+        return None;
+    }
+    let meters = raw.parse::<f64>().ok()?;
+    let feet = meters * 3.28084;
+    Some(format!("{:.1} ft", feet))
+}
+
+fn parse_fernandina_beach_flag(body: &str) -> Option<String> {
+    let marker_index = body.find("Aquatic Risk")?;
+    let section = &body[marker_index..];
+    let section_lower = section.to_lowercase();
+
+    if section_lower.contains("double red") || section_lower.contains("water closed to the public") {
+        return Some("Double Red".to_string());
+    }
+    if section_lower.contains("marine pest") || section_lower.contains("purple") {
+        return Some("Purple".to_string());
+    }
+    if section_lower.contains("high hazard") || section_lower.contains(">danger") || section_lower.contains("### danger") {
+        return Some("Red".to_string());
+    }
+    if section_lower.contains("caution") || section_lower.contains("medium hazard") {
+        return Some("Yellow".to_string());
+    }
+    if section_lower.contains("low hazard") || section_lower.contains("calm") || section_lower.contains("green") {
+        return Some("Green".to_string());
+    }
+
+    extract_heading_after(section, "###")
+}
+
+fn extract_heading_after(section: &str, marker: &str) -> Option<String> {
+    let idx = section.find(marker)?;
+    let after = &section[idx + marker.len()..];
+    let line = after.lines().next()?.trim();
+    if line.is_empty() {
+        None
+    } else {
+        Some(line.to_string())
     }
 }
 
@@ -981,7 +1129,9 @@ async fn updater(stocks: Arc<Mutex<Vec<Stock>>>) -> Result<()> {
     let mut stocks_lck = stocks.lock().await;
     if !stocks_lck.is_empty() {
         for stock in stocks_lck.iter_mut() {
-            let _ = stock.update().await?;
+            if let Err(error) = stock.update().await {
+                println!("Failed to update stock {}: {}", stock.symbol, error);
+            }
         }
     }
     Ok(())

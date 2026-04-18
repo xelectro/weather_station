@@ -1007,13 +1007,14 @@
         chatLog.scrollTop = chatLog.scrollHeight;
       };
 
-      const applyEvent = event => {
+      const applyEvent = (event, options = {}) => {
+        const { playAudio = true } = options;
         if (Array.isArray(event.users)) {
           users = [...event.users];
           renderUsers();
         }
         if (event.kind === "message" && (event.message || event.image_data)) {
-          if (event.user_id !== currentUser) {
+          if (playAudio && event.user_id !== currentUser) {
             playSound(inSound);
           }
           appendMessage({
@@ -1026,9 +1027,9 @@
             imageData: event.image_data,
           });
         } else if ((event.kind === "join" || event.kind === "leave") && event.message) {
-          if (event.kind === "join") {
+          if (playAudio && event.kind === "join") {
             playSound(openDoor);
-          } else {
+          } else if (playAudio) {
             playSound(closeDoor);
           }
           appendMessage({
@@ -1263,7 +1264,9 @@
           users = Array.isArray(data.users) ? data.users : [];
           renderUsers();
           if (Array.isArray(data.history)) {
-            data.history.forEach(event => applyEvent(event));
+            data.history
+              .filter(event => event?.kind === "message")
+              .forEach(event => applyEvent(event, { playAudio: false }));
           }
         } catch (_error) {
           appendMessage({

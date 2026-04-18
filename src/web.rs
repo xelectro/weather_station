@@ -32,6 +32,31 @@ pub struct OutputTemplate {
 
 
 #[derive(Clone, Serialize, Deserialize)]
+pub struct BuoyObservation {
+    pub station: String,
+    pub wave_height_ft: Option<String>,
+    pub interval_sec: Option<String>,
+    pub water_temp_f: Option<String>,
+    pub air_temp_f: Option<String>,
+    pub beach_flag: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+impl BuoyObservation {
+    pub fn new(station: impl Into<String>) -> Self {
+        Self {
+            station: station.into(),
+            wave_height_ft: None,
+            interval_sec: None,
+            water_temp_f: None,
+            air_temp_f: None,
+            beach_flag: None,
+            updated_at: None,
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SseData {
     pub display: HashMap<String, String>,
     pub users: HashMap<String, String>,
@@ -41,6 +66,7 @@ pub struct SseData {
     pub stocks: Vec<Stock>,
     pub oil1: OilDisplay,
     pub oil2: OilDisplay,
+    pub buoy: BuoyObservation,
     pub status: String,
 }
 impl SseData {
@@ -58,6 +84,7 @@ impl SseData {
             stocks: Vec::new(),
             oil1: OilDisplay::new(),
             oil2: OilDisplay::new(),
+            buoy: BuoyObservation::new("41112"),
             status: "Hello World!".to_string(),
         }
     }
@@ -133,6 +160,7 @@ pub struct AppState {
     pub sender_ws: Sender<(String,String)>,
     pub stocks: Arc<Mutex<Vec<Stock>>>,
     pub oil: Arc<Mutex<Vec<OilPrice>>>,
+    pub buoy: BuoyObservation,
     pub status: String,
 }
 impl AppState {
@@ -158,6 +186,7 @@ impl AppState {
             sender_ws: sender,
             stocks: Arc::new(Mutex::new(Vec::new())),
             oil: Arc::new(Mutex::new(oil_output)),
+            buoy: BuoyObservation::new("41112"),
             status: String::new(),
         }))
     }

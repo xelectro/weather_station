@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>WX Station</title>
-  <link rel="stylesheet" href="/static/wx_station.css" />
+  <link rel="stylesheet" href="/static/wx_station.css?v=20260409a" />
 </head>
 <body>
   <div class="page-shell">
@@ -13,6 +13,7 @@
         <p class="eyebrow">Local cockpit dashboard</p>
         <h1>WX Station</h1>
         <p>Weather, energy, equities, and aviation updates in one fast glanceable layout.</p>
+        <div id="buoy_bar" class="buoy-strip"></div>
       </div>
       <div class="hero-status card">
         <p class="hero-status-label">Stream</p>
@@ -64,15 +65,15 @@
             <div class="gauge-row summary-gauges">
               <div class="gauge-card">
                 <p class="gauge-label">Temperature</p>
-                <div class="gauge" id="temp_gauge" style="--value:0.3; --color:#ffb14d;">30%</div>
+                <div class="gauge" id="temp_gauge" style="--value:0.3; --color:#ffb14d;"><span class="gauge-value">30%</span></div>
               </div>
               <div class="gauge-card">
                 <p class="gauge-label">Dew Point</p>
-                <div class="gauge" id="dew_point" style="--value:0.3; --color:#53d6c7;">30%</div>
+                <div class="gauge" id="dew_point" style="--value:0.3; --color:#53d6c7;"><span class="gauge-value">30%</span></div>
               </div>
               <div class="gauge-card">
                 <p class="gauge-label">Humidity</p>
-                <div class="gauge" id="rh_meter" style="--value:0.3; --color:#69d2ff;">30%</div>
+                <div class="gauge" id="rh_meter" style="--value:0.3; --color:#69d2ff;"><span class="gauge-value">30%</span></div>
               </div>
             </div>
           </div>
@@ -180,9 +181,23 @@ let getWx = document.getElementById("getWx");
 getWx.addEventListener("submit", event => {
   event.preventDefault();
   let formData = new FormData(event.target);
+  const submittedZip = String(formData.get("zip") || "").trim();
   fetch("/", {
     method: "POST",
     body: formData,
+  }).then(response => {
+    if (response.ok && /^\d{5}$/.test(submittedZip)) {
+      zip = submittedZip;
+      const zipInput = document.getElementById("zip");
+      if (zipInput) {
+        zipInput.value = submittedZip;
+      }
+      if (main_data.city) {
+        locationLabel.innerText = `${main_data.city} (${zip})`;
+      } else {
+        locationLabel.innerText = `Zip: ${zip}`;
+      }
+    }
   });
 });
 let zip = "{{ zip }}";
@@ -196,6 +211,7 @@ let dewVal = null;
 let rhVal = null;
 const status_bar = document.getElementById("status");
 const themeToggle = document.getElementById("theme_toggle");
+const buoyBar = document.getElementById("buoy_bar");
 const wxDetailsLabel = document.getElementById("wx_details_label");
 const locationLabel = document.getElementById("location_label");
 const timeLabel = document.getElementById("time_label");
@@ -246,11 +262,11 @@ const renderGauges = () => {
     return;
   }
   temp.style.setProperty("--value", tempVal / 120);
-  temp.innerHTML = Math.round(tempVal) + "&#176";
+  temp.innerHTML = `<span class="gauge-value">${Math.round(tempVal)}&#176;</span>`;
   dew.style.setProperty("--value", dewVal / 120);
-  dew.innerHTML = Math.round(dewVal) + "&#176";
+  dew.innerHTML = `<span class="gauge-value">${Math.round(dewVal)}&#176;</span>`;
   rh.style.setProperty("--value", rhVal / 100);
-  rh.innerHTML = Math.round(rhVal) + "%";
+  rh.innerHTML = `<span class="gauge-value">${Math.round(rhVal)}%</span>`;
 };
 const toTitleCase = text => {
   if (!text) {
@@ -279,8 +295,31 @@ setTimeout(() =>{
       let stocks = main_data.stocks;
       let oil1 = main_data.oil1;
       let oil2 = main_data.oil2;
+      let buoy = main_data.buoy;
       main_data = main_data.wx;
       stockItemsContainer.replaceChildren();
+      buoyBar.replaceChildren();
+      const buoyFields = [
+        { label: "Wave", value: buoy?.wave_height_ft || "--" },
+        { label: "Interval", value: buoy?.interval_sec || "--" },
+        { label: "Flag", value: buoy?.beach_flag || "--" },
+      ];
+      buoyFields.forEach(fieldData => {
+        let field = document.createElement("div");
+        field.className = "top-block buoy-block";
+        if (fieldData.label === "Flag") {
+          field.classList.add(`flag-${String(fieldData.value).toLowerCase().replace(/\s+/g, "-")}`);
+        }
+        let label = document.createElement("p");
+        label.className = "ticker-symbol";
+        let value = document.createElement("p");
+        value.className = "ticker-price";
+        label.innerText = fieldData.label;
+        value.innerText = fieldData.value;
+        field.appendChild(label);
+        field.appendChild(value);
+        buoyBar.appendChild(field);
+      });
       let wti_price = {"symbol": "WTI", "price": oil1.price, "change": oil1.change_ammount,
        "perc_chng": oil1.change_percent, "time": oil1.updated_at, "display": null};
       let brent_price = {"symbol": "BRENT", "price": oil2.price, "change": oil2.change_ammount,
@@ -317,7 +356,7 @@ setTimeout(() =>{
         stockItemsContainer.appendChild(field);
       });
 
-      status_bar.innerText = main_data.status;
+      status_bar.innerText = typeof main_data.status === "string" ? main_data.status : "";
       wxDetailsLabel.innerText = main_data.desc ? toTitleCase(main_data.desc) : "No Data Yet";
       locationLabel.innerText = main_data.city ? `${main_data.city} (${zip !== "None" ? zip : "Live"})` : `Zip: ${zip !== "None" ? zip : "Not set"}`;
       timeLabel.innerText = main_data.now ? main_data.now : "Waiting for update";
@@ -407,6 +446,30 @@ setTimeout(() =>{
     }
   }
 }, 500);
+async function getFernandinaConditions() {
+  const res = await fetch("https://www.ndbc.noaa.gov/data/latest_obs/latest_obs.txt");
+  const text = await res.text();
+
+  const lines = text.split("\n").filter(Boolean);
+
+  // latest_obs.txt is space-delimited, with a header row and units row first
+  const dataLines = lines.slice(2);
+
+  const row41112 = dataLines.find(line => line.trim().startsWith("41112 "));
+  if (!row41112) throw new Error("Buoy 41112 not found");
+
+  const cols = row41112.trim().split(/\s+/);
+
+  // NDBC latest_obs columns include station id, lat, lon, date parts, wind, wave, pressure, temps, etc.
+  // Column positions can change if NOAA revises format, so confirm against the data guide.
+  return {
+    station: cols[0],
+    waveHeightMeters: cols[12],   // verify against current header
+    dominantPeriodSec: cols[13],  // verify against current header
+    waterTempC: cols[18],         // verify against current header
+    airTempC: cols[17],           // may be MM for this buoy
+  };
+}
   </script>
 </body>
 </html>
