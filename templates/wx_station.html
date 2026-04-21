@@ -168,7 +168,7 @@ chat_btn.addEventListener("click", event => {
     window.location.assign('/chat');
     return;
   }
-  window.open('/chat','Chat Box','width=840,height=720,resizable=yes,scrollbars=yes');
+  window.open(`/chat?fresh=${Date.now()}`,'_blank','width=840,height=720,resizable=yes,scrollbars=yes');
 });
 metarBtn.addEventListener("click", event =>{
   if (isMobileViewport()) {

@@ -4,7 +4,7 @@ use axum::response::sse::KeepAlive;
 use axum::{
     Router,
     extract::{ws::{WebSocket, WebSocketUpgrade, Message as WsMessage}, Multipart, State, Path},
-    http::StatusCode,
+    http::{StatusCode, header},
     Json,
     response::sse::{Event, Sse},
     routing::{get, post},
@@ -959,10 +959,17 @@ async fn taf_get(Path(val): Path<String>, State(_app_state): State<Arc<Mutex<App
 async fn chat_get(State(_app_state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse{
     let template = web::ChatTemplate {userid: "none".to_string(), val: "Welcome".to_string()};
     match template.render() {
-        Ok(html) => Html(html),
+        Ok(html) => (
+            [
+                (header::CACHE_CONTROL, "no-store, no-cache, must-revalidate, max-age=0"),
+                (header::PRAGMA, "no-cache"),
+                (header::EXPIRES, "0"),
+            ],
+            Html(html),
+        ).into_response(),
         Err(e) => {
             println!("Failed to render chat template: {}", e);
-            Html("Template render failed".to_string())
+            Html("Template render failed".to_string()).into_response()
         }
     }
 }
@@ -971,10 +978,17 @@ async fn chat_get(State(_app_state): State<Arc<Mutex<AppState>>>) -> impl IntoRe
 /// recent in-memory history, for newly opened chat clients.
 async fn chat_state_get(State(app_state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {
     let state_lck = app_state.lock().await;
-    Json(ChatBootstrap {
-        users: sorted_users(&state_lck.users),
-        history: state_lck.chat_history.clone(),
-    })
+    (
+        [
+            (header::CACHE_CONTROL, "no-store, no-cache, must-revalidate, max-age=0"),
+            (header::PRAGMA, "no-cache"),
+            (header::EXPIRES, "0"),
+        ],
+        Json(ChatBootstrap {
+            users: sorted_users(&state_lck.users),
+            history: state_lck.chat_history.clone(),
+        }),
+    )
 }
 
 /// Legacy form-based chat entry point that registers a user and re-renders the
@@ -1083,7 +1097,8 @@ async fn logout(State(app_state): State<Arc<Mutex<AppState>>>, form_data: Multip
         }
     };
     if let Some(logout_id) = form.get("logout") {
-        app_state.lock().await.users.remove(logout_id);
+        let mut state = app_state.lock().await;
+        state.users.remove(logout_id);
     }
     println!("User Logged out");
     StatusCode::OK

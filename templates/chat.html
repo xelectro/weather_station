@@ -1008,8 +1008,8 @@
       };
 
       const applyEvent = (event, options = {}) => {
-        const { playAudio = true } = options;
-        if (Array.isArray(event.users)) {
+        const { playAudio = true, syncUsers = true } = options;
+        if (syncUsers && Array.isArray(event.users)) {
           users = [...event.users];
           renderUsers();
         }
@@ -1236,12 +1236,27 @@
         joinedSocket = false;
       };
 
+      const postLogout = userId => {
+        const logoutId = String(userId || "").trim();
+        if (!logoutId) {
+          return;
+        }
+        const formData = new FormData();
+        formData.append("logout", logoutId);
+        fetch("/logout", {
+          method: "POST",
+          body: formData,
+          keepalive: true,
+        }).catch(() => {});
+      };
+
       const clearLocalSession = () => {
         users = users.filter(user => user !== currentUser);
         renderUsers();
         messageInput.value = "";
         pendingImage = null;
         currentUser = "";
+        joinedSocket = false;
         updateIdentityUi();
       };
 
@@ -1250,13 +1265,29 @@
           return;
         }
         isUnloading = true;
+        postLogout(currentUser);
         sendLeave();
         socket.close(1000, "window closing");
       };
 
+      const resetRestoredSession = () => {
+        if (currentUser === "" && !joinedSocket) {
+          return;
+        }
+        clearLocalSession();
+        appendMessage({
+          user: "System",
+          body: "Chat reopened with a fresh session.",
+          time: nowLabel(),
+          tone: "system",
+        });
+      };
+
       const loadChatState = async () => {
         try {
-          const response = await fetch("/chat_state");
+          const response = await fetch(`/chat_state?fresh=${Date.now()}`, {
+            cache: "no-store",
+          });
           if (!response.ok) {
             return;
           }
@@ -1266,7 +1297,7 @@
           if (Array.isArray(data.history)) {
             data.history
               .filter(event => event?.kind === "message")
-              .forEach(event => applyEvent(event, { playAudio: false }));
+              .forEach(event => applyEvent(event, { playAudio: false, syncUsers: false }));
           }
         } catch (_error) {
           appendMessage({
@@ -1282,12 +1313,6 @@
         setConnectionState("online");
         syncComposerState();
         sendJoin();
-        appendMessage({
-          user: "System",
-          body: "WebSocket connected.",
-          time: nowLabel(),
-          tone: "system",
-        });
       });
 
       socket.addEventListener("close", () => {
@@ -1347,6 +1372,7 @@
       });
 
       leaveButton?.addEventListener("click", () => {
+        postLogout(currentUser);
         sendLeave();
         clearLocalSession();
       });
@@ -1486,6 +1512,11 @@
 
       window.addEventListener("beforeunload", handleWindowExit);
       window.addEventListener("pagehide", handleWindowExit);
+      window.addEventListener("pageshow", event => {
+        if (event.persisted) {
+          resetRestoredSession();
+        }
+      });
     </script>
   </body>
 </html>
