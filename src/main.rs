@@ -3,7 +3,7 @@ use axum::response::{Html, IntoResponse, Redirect};
 use axum::response::sse::KeepAlive;
 use axum::{
     Router,
-    extract::{ws::{WebSocket, WebSocketUpgrade, Message as WsMessage}, Multipart, State, Path},
+    extract::{ws::{WebSocket, WebSocketUpgrade, Message as WsMessage}, DefaultBodyLimit, Multipart, State, Path},
     http::{StatusCode, header},
     Json,
     response::sse::{Event, Sse},
@@ -17,7 +17,7 @@ use serde_json;
 use std::collections::HashMap;
 use std::future::Future;
 use std::fs;
-use std::path;
+use std::path::{self, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use std::{convert::Infallible, time::Duration};
@@ -28,31 +28,44 @@ use chrono::{self, Local, TimeZone};
 pub mod web;
 pub mod stocks;
 pub mod oil;
-use web::{AppState, AviationEntry, AviationSocketRequest, AviationSocketResponse, BuoyObservation, ChatBootstrap, ChatClientMessage, ChatEvent, SseData, WsOutput};
+use web::{AppState, AviationEntry, AviationSocketRequest, AviationSocketResponse, BuoyObservation, ChatBootstrap, ChatClientMessage, ChatEvent, ChatUploadResponse, SseData, WsOutput};
 use stocks::Stock;
 use anyhow::anyhow;
 use uuid;
 use lettre::{Message, SmtpTransport, Transport};
 use anyhow::Result;
 
+const CHAT_UPLOAD_LIMIT_BYTES: usize = 20 * 1024 * 1024;
+const CHAT_UPLOAD_REQUEST_LIMIT_BYTES: usize = 25 * 1024 * 1024;
+const CHAT_MEDIA_DIR: &str = "static/chat_media";
+const CHAT_MEDIA_ORIGINALS_DIR: &str = "static/chat_media/originals";
+const CHAT_MEDIA_THUMBS_DIR: &str = "static/chat_media/thumbs";
+const CHAT_MEDIA_MAX_AGE_SECS: u64 = 30 * 24 * 60 * 60;
+const CHAT_MEDIA_CLEANUP_INTERVAL_SECS: u64 = 24 * 60 * 60;
+
 /// Boots the Axum application, initializes shared state, and starts the
 /// background data acquisition loop before serving HTTP and WebSocket routes.
 #[tokio::main]
 async fn main() -> Result<()> {
+    ensure_chat_media_dirs()?;
+    purge_chat_media_on_startup()?;
     let app_state = AppState::new();
     tokio::spawn(aquire_data(app_state.clone()));
+    tokio::spawn(chat_media_cleanup_task());
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
     // build our application with a route
     let app = Router::new()
         .route("/sse", get(sse_handler))
         .route("/", get(default_get).post(default_post))
         .nest_service("/static", ServeDir::new("static"))
+        .nest_service("/chat_media", ServeDir::new(CHAT_MEDIA_DIR))
         .route("/metar", get(metar_get).post(metar_post))
         .route("/stock", post(stock_post))
         .route("/taf", get(taf_root_get))
         .route("/taf/{airport}", get(taf_get))
         .route("/chat", get(chat_get).post(chat_post))
         .route("/chat_state", get(chat_state_get))
+        .route("/chat_upload", post(chat_upload_post))
         .route("/users", get(users_get))
         .route("/output", get(output_get))
         .route("/input", get(input_get).post(input_post))
@@ -62,6 +75,7 @@ async fn main() -> Result<()> {
         .route("/ws_local", get(ws_local_handler))
         .route("/ws_aviation", get(ws_aviation_handler))
         .route("/test", get(test_get))
+        .layer(DefaultBodyLimit::max(CHAT_UPLOAD_REQUEST_LIMIT_BYTES))
         .with_state(app_state);
     let _ = axum::serve(listener, app).await;
     Ok(())
@@ -162,6 +176,7 @@ async fn handle_ws(state: Arc<Mutex<AppState>>, socket: WebSocket, loop_back: bo
                                         image_name: None,
                                         image_type: None,
                                         image_data: None,
+                                        image_thumb: None,
                                         now,
                                         users,
                                     };
@@ -189,6 +204,7 @@ async fn handle_ws(state: Arc<Mutex<AppState>>, socket: WebSocket, loop_back: bo
                                             image_name: input.image_name,
                                             image_type: input.image_type,
                                             image_data: input.image_data,
+                                            image_thumb: input.image_thumb,
                                             now,
                                             users,
                                         };
@@ -441,6 +457,7 @@ fn handle_user_departure(
                 image_name: None,
                 image_type: None,
                 image_data: None,
+                image_thumb: None,
                 now,
                 users,
             };
@@ -991,6 +1008,89 @@ async fn chat_state_get(State(app_state): State<Arc<Mutex<AppState>>>) -> impl I
     )
 }
 
+/// Accepts an original chat image and a client-generated thumbnail, stores
+/// both under static media paths, and returns URLs that the chat UI can embed.
+async fn chat_upload_post(mut form: Multipart) -> impl IntoResponse {
+    let mut image_name = String::new();
+    let mut image_type = String::new();
+    let mut original_bytes = Vec::new();
+    let mut thumbnail_bytes = Vec::new();
+    let mut thumbnail_type = String::new();
+
+    while let Some(field) = match form.next_field().await {
+        Ok(field) => field,
+        Err(e) => {
+            println!("Failed to parse chat upload field: {}", e);
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    } {
+        let field_name = field.name().unwrap_or("").to_string();
+        match field_name.as_str() {
+            "image_name" => {
+                image_name = field.text().await.unwrap_or_default();
+            }
+            "image_type" => {
+                image_type = field.text().await.unwrap_or_default();
+            }
+            "thumbnail_type" => {
+                thumbnail_type = field.text().await.unwrap_or_default();
+            }
+            "image" => {
+                original_bytes = match field.bytes().await {
+                    Ok(bytes) => bytes.to_vec(),
+                    Err(_) => return Err(StatusCode::BAD_REQUEST),
+                };
+            }
+            "thumbnail" => {
+                thumbnail_bytes = match field.bytes().await {
+                    Ok(bytes) => bytes.to_vec(),
+                    Err(_) => return Err(StatusCode::BAD_REQUEST),
+                };
+            }
+            _ => {}
+        }
+    }
+
+    if original_bytes.is_empty() || thumbnail_bytes.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if original_bytes.len() > CHAT_UPLOAD_LIMIT_BYTES {
+        return Err(StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    let original_ext = media_extension(&image_type, &image_name).unwrap_or("bin");
+    let thumb_ext = media_extension(&thumbnail_type, &image_name).unwrap_or("jpg");
+    let file_id = uuid::Uuid::new_v4().to_string();
+    let original_filename = format!("{}.{}", file_id, original_ext);
+    let thumb_filename = format!("{}-thumb.{}", file_id, thumb_ext);
+    let original_path = PathBuf::from(CHAT_MEDIA_ORIGINALS_DIR).join(&original_filename);
+    let thumb_path = PathBuf::from(CHAT_MEDIA_THUMBS_DIR).join(&thumb_filename);
+
+    if let Err(e) = tokio::fs::write(&original_path, original_bytes).await {
+        println!("Failed to store chat image: {}", e);
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+    if let Err(e) = tokio::fs::write(&thumb_path, thumbnail_bytes).await {
+        println!("Failed to store chat thumbnail: {}", e);
+        let _ = tokio::fs::remove_file(&original_path).await;
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    let original_url = format!("/chat_media/originals/{}", original_filename);
+    let thumbnail_url = format!("/chat_media/thumbs/{}", thumb_filename);
+
+    Ok(Json(ChatUploadResponse {
+        image_name: if image_name.trim().is_empty() {
+            format!("image.{}", original_ext)
+        } else {
+            image_name
+        },
+        image_type,
+        image_url: original_url,
+        thumbnail_url,
+    }))
+}
+
 /// Legacy form-based chat entry point that registers a user and re-renders the
 /// chat template. The current chat window uses WebSockets after load.
 async fn chat_post(State(app_state): State<Arc<Mutex<AppState>>>, form: Multipart) -> impl IntoResponse {
@@ -1213,6 +1313,119 @@ async fn process_form(mut form: Multipart) -> Result<HashMap<String, String>> {
 fn read_html_file(path: &path::Path) -> Result<String> {
     let output = fs::read_to_string(path)?;
     Ok(output)
+}
+
+fn ensure_chat_media_dirs() -> Result<()> {
+    fs::create_dir_all(CHAT_MEDIA_ORIGINALS_DIR)?;
+    fs::create_dir_all(CHAT_MEDIA_THUMBS_DIR)?;
+    Ok(())
+}
+
+fn purge_chat_media_on_startup() -> Result<()> {
+    let removed = remove_chat_media_files_in_dir(CHAT_MEDIA_ORIGINALS_DIR)?
+        + remove_chat_media_files_in_dir(CHAT_MEDIA_THUMBS_DIR)?;
+    if removed > 0 {
+        println!("Removed {} chat media files during startup cleanup.", removed);
+    }
+    Ok(())
+}
+
+async fn chat_media_cleanup_task() {
+    let mut cleanup_interval = interval(Duration::from_secs(CHAT_MEDIA_CLEANUP_INTERVAL_SECS));
+    cleanup_interval.tick().await;
+    loop {
+        cleanup_interval.tick().await;
+        match cleanup_chat_media_older_than(Duration::from_secs(CHAT_MEDIA_MAX_AGE_SECS)) {
+            Ok(removed) if removed > 0 => {
+                println!("Removed {} expired chat media files.", removed);
+            }
+            Ok(_) => {}
+            Err(e) => {
+                println!("Failed to clean expired chat media: {}", e);
+            }
+        }
+    }
+}
+
+fn cleanup_chat_media_older_than(max_age: Duration) -> Result<usize> {
+    Ok(
+        remove_expired_chat_media_files_in_dir(CHAT_MEDIA_ORIGINALS_DIR, max_age)?
+            + remove_expired_chat_media_files_in_dir(CHAT_MEDIA_THUMBS_DIR, max_age)?
+    )
+}
+
+fn remove_chat_media_files_in_dir(dir: &str) -> Result<usize> {
+    let mut removed = 0;
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() {
+            fs::remove_file(&path)?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+fn remove_expired_chat_media_files_in_dir(dir: &str, max_age: Duration) -> Result<usize> {
+    let mut removed = 0;
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let metadata = entry.metadata()?;
+        let modified = match metadata.modified() {
+            Ok(modified) => modified,
+            Err(_) => continue,
+        };
+        let age = match modified.elapsed() {
+            Ok(age) => age,
+            Err(_) => continue,
+        };
+        if age >= max_age {
+            fs::remove_file(&path)?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+fn media_extension(content_type: &str, filename: &str) -> Option<&'static str> {
+    let normalized = content_type.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "image/jpeg" | "image/jpg" => Some("jpg"),
+        "image/png" => Some("png"),
+        "image/webp" => Some("webp"),
+        "image/gif" => Some("gif"),
+        "image/bmp" => Some("bmp"),
+        "image/tiff" => Some("tiff"),
+        "image/svg+xml" => Some("svg"),
+        "image/avif" => Some("avif"),
+        _ => {
+            let lowered = filename.to_ascii_lowercase();
+            if lowered.ends_with(".jpg") || lowered.ends_with(".jpeg") {
+                Some("jpg")
+            } else if lowered.ends_with(".png") {
+                Some("png")
+            } else if lowered.ends_with(".webp") {
+                Some("webp")
+            } else if lowered.ends_with(".gif") {
+                Some("gif")
+            } else if lowered.ends_with(".bmp") {
+                Some("bmp")
+            } else if lowered.ends_with(".tif") || lowered.ends_with(".tiff") {
+                Some("tiff")
+            } else if lowered.ends_with(".svg") {
+                Some("svg")
+            } else if lowered.ends_with(".avif") {
+                Some("avif")
+            } else {
+                None
+            }
+        }
+    }
 }
 
 /// Looks up the current public IP address and sends an email notification if it

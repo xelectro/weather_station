@@ -743,6 +743,9 @@
       let isUnloading = false;
       let users = [];
       let pendingImage = null;
+      const imageUploadLimitBytes = 20 * 1024 * 1024;
+      const imageUploadLimitLabel = "20 MB";
+      const thumbnailMaxDimension = 320;
       const accentPalette = [
         "#69d2ff",
         "#53d6c7",
@@ -849,7 +852,9 @@
       };
 
       const looksLikeImageUrl = value => {
-        return /^https?:\/\/\S+\.(png|jpe?g|gif|webp|bmp|svg|avif|tiff?)(\?\S*)?$/i.test(String(value || "").trim());
+        const normalized = String(value || "").trim();
+        return /^https?:\/\/\S+\.(png|jpe?g|gif|webp|bmp|svg|avif|tiff?)(\?\S*)?$/i.test(normalized)
+          || /^\/chat_media\/\S+/i.test(normalized);
       };
 
       const isImageFile = file => {
@@ -876,22 +881,6 @@
         if (name.endsWith(".avif")) return "image/avif";
         if (name.endsWith(".tif") || name.endsWith(".tiff")) return "image/tiff";
         return "";
-      };
-
-      const normalizedImageData = (file, rawData) => {
-        const imageType = normalizedImageType(file);
-        const value = typeof rawData === "string" ? rawData : "";
-        if (!value || !imageType) {
-          return value;
-        }
-        if (value.startsWith(`data:${imageType}`)) {
-          return value;
-        }
-        const commaIndex = value.indexOf(",");
-        if (value.startsWith("data:") && commaIndex > -1) {
-          return `data:${imageType};base64${value.slice(commaIndex)}`;
-        }
-        return value;
       };
 
       const openLightbox = (src, alt) => {
@@ -933,9 +922,11 @@
         }
       };
 
-      const appendImageAttachment = (element, imageName, imageType, imageData) => {
+      const appendImageAttachment = (element, imageName, imageType, imageData, imageThumb = null) => {
+        const displaySource = imageThumb || imageData;
         const isRemoteImage = looksLikeImageUrl(imageData);
-        if (!isImagePayload(imageType, imageData) && !isRemoteImage) {
+        const isRemoteThumb = looksLikeImageUrl(displaySource);
+        if (!isImagePayload(imageType, imageData) && !isRemoteImage && !isRemoteThumb) {
           return;
         }
 
@@ -951,7 +942,7 @@
 
         const image = document.createElement("img");
         image.className = "chat-image-thumb";
-        image.src = imageData;
+        image.src = displaySource;
         image.alt = imageName || "Chat image";
 
         const label = document.createElement("span");
@@ -963,7 +954,7 @@
         element.appendChild(link);
       };
 
-      const appendMessage = ({ user, body, time, tone = "chat", imageName = null, imageType = null, imageData = null }) => {
+      const appendMessage = ({ user, body, time, tone = "chat", imageName = null, imageType = null, imageData = null, imageThumb = null }) => {
         const item = document.createElement("article");
         item.className = "message";
         if (tone === "self") {
@@ -995,7 +986,7 @@
         const bodyEl = document.createElement("div");
         bodyEl.className = "message-body";
         appendLinkedText(bodyEl, body || "");
-        appendImageAttachment(bodyEl, imageName, imageType, imageData);
+        appendImageAttachment(bodyEl, imageName, imageType, imageData, imageThumb);
 
         identity.appendChild(avatar);
         identity.appendChild(userEl);
@@ -1025,6 +1016,7 @@
             imageName: event.image_name,
             imageType: event.image_type,
             imageData: event.image_data,
+            imageThumb: event.image_thumb,
           });
         } else if ((event.kind === "join" || event.kind === "leave") && event.message) {
           if (playAudio && event.kind === "join") {
@@ -1081,39 +1073,100 @@
           });
           return;
         }
-        if (file.size > 5 * 1024 * 1024) {
+        if (file.size > imageUploadLimitBytes) {
           appendMessage({
             user: "System",
-            body: "Image is too large. Please keep chat images under 5 MB.",
+            body: `Image is too large. Please keep chat images under ${imageUploadLimitLabel}.`,
             time: nowLabel(),
             tone: "system",
           });
           return;
         }
+        const imageType = normalizedImageType(file);
+        if (!imageType) {
+          appendMessage({
+            user: "System",
+            body: "That dropped file could not be read as an image.",
+            time: nowLabel(),
+            tone: "system",
+          });
+          return;
+        }
+        pendingImage = {
+          file,
+          name: file.name,
+          type: imageType,
+        };
+        syncComposerState();
+        messageInput.focus();
+      };
 
-        const reader = new FileReader();
-        reader.addEventListener("load", () => {
-          const rawImageData = typeof reader.result === "string" ? reader.result : "";
-          const imageType = normalizedImageType(file);
-          const imageData = normalizedImageData(file, rawImageData);
-          if (!imageData || !imageType) {
-            appendMessage({
-              user: "System",
-              body: "That dropped file could not be read as an image.",
-              time: nowLabel(),
-              tone: "system",
-            });
-            return;
+      const loadImageElement = file => new Promise((resolve, reject) => {
+        const objectUrl = URL.createObjectURL(file);
+        const image = new Image();
+        image.onload = () => {
+          resolve({ image, objectUrl });
+        };
+        image.onerror = () => {
+          URL.revokeObjectURL(objectUrl);
+          reject(new Error("Unable to decode image."));
+        };
+        image.src = objectUrl;
+      });
+
+      const createThumbnailBlob = async file => {
+        const { image, objectUrl } = await loadImageElement(file);
+        try {
+          const maxSide = Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height);
+          const scale = maxSide > thumbnailMaxDimension ? (thumbnailMaxDimension / maxSide) : 1;
+          const width = Math.max(1, Math.round((image.naturalWidth || image.width) * scale));
+          const height = Math.max(1, Math.round((image.naturalHeight || image.height) * scale));
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const context = canvas.getContext("2d");
+          if (!context) {
+            throw new Error("Canvas rendering unavailable.");
           }
-          pendingImage = {
-            name: file.name,
-            type: imageType,
-            data: imageData,
+          context.drawImage(image, 0, 0, width, height);
+          const thumbnailType = normalizedImageType(file) === "image/png" ? "image/png" : "image/jpeg";
+          const thumbnailBlob = await new Promise(resolve => {
+            canvas.toBlob(resolve, thumbnailType, 0.82);
+          });
+          if (!thumbnailBlob) {
+            throw new Error("Unable to encode thumbnail.");
+          }
+          return {
+            blob: thumbnailBlob,
+            type: thumbnailType,
           };
-          syncComposerState();
-          messageInput.focus();
+        } finally {
+          URL.revokeObjectURL(objectUrl);
+        }
+      };
+
+      const uploadPendingImage = async imageToUpload => {
+        if (!imageToUpload?.file) {
+          return null;
+        }
+        const thumbnail = await createThumbnailBlob(imageToUpload.file);
+        const formData = new FormData();
+        formData.append("image_name", imageToUpload.name);
+        formData.append("image_type", imageToUpload.type);
+        formData.append("thumbnail_type", thumbnail.type);
+        formData.append("image", imageToUpload.file, imageToUpload.name);
+        formData.append("thumbnail", thumbnail.blob, `thumb-${imageToUpload.name}`);
+        const response = await fetch("/chat_upload", {
+          method: "POST",
+          body: formData,
         });
-        reader.readAsDataURL(file);
+        if (!response.ok) {
+          const reason = response.status === 413
+            ? `Image is too large. Please keep chat images under ${imageUploadLimitLabel}.`
+            : "Image upload failed.";
+          throw new Error(reason);
+        }
+        return response.json();
       };
 
       const handleDroppedFiles = files => {
@@ -1187,6 +1240,7 @@
             image_name: droppedText.split("/").pop() || "Image link",
             image_type: "image/url",
             image_data: droppedText,
+            image_thumb: droppedText,
           }));
           playSound(outSound);
           appendMessage({
@@ -1197,6 +1251,7 @@
             imageName: droppedText.split("/").pop() || "Image link",
             imageType: "image/url",
             imageData: droppedText,
+            imageThumb: droppedText,
           });
           return;
         }
@@ -1379,6 +1434,7 @@
 
       composerForm.addEventListener("submit", event => {
         event.preventDefault();
+        void (async () => {
         if (socket.readyState !== WebSocket.OPEN || currentUser === "") {
           return;
         }
@@ -1388,13 +1444,33 @@
           return;
         }
 
+        let uploadedImage = null;
+        if (pendingImage?.file) {
+          sendButton.disabled = true;
+          imageButton.disabled = true;
+          composerStatus.innerText = `Uploading ${pendingImage.name}...`;
+          try {
+            uploadedImage = await uploadPendingImage(pendingImage);
+          } catch (error) {
+            appendMessage({
+              user: "System",
+              body: error instanceof Error ? error.message : "Image upload failed.",
+              time: nowLabel(),
+              tone: "system",
+            });
+            syncComposerState();
+            return;
+          }
+        }
+
         socket.send(JSON.stringify({
           kind: "message",
           user_id: currentUser,
           message,
-          image_name: pendingImage?.name || null,
-          image_type: pendingImage?.type || null,
-          image_data: pendingImage?.data || null,
+          image_name: uploadedImage?.image_name || pendingImage?.name || null,
+          image_type: uploadedImage?.image_type || pendingImage?.type || null,
+          image_data: uploadedImage?.image_url || null,
+          image_thumb: uploadedImage?.thumbnail_url || null,
         }));
         playSound(outSound);
         appendMessage({
@@ -1402,14 +1478,16 @@
           body: message,
           time: nowLabel(),
           tone: "self",
-          imageName: pendingImage?.name || null,
-          imageType: pendingImage?.type || null,
-          imageData: pendingImage?.data || null,
+          imageName: uploadedImage?.image_name || pendingImage?.name || null,
+          imageType: uploadedImage?.image_type || pendingImage?.type || null,
+          imageData: uploadedImage?.image_url || null,
+          imageThumb: uploadedImage?.thumbnail_url || null,
         });
         messageInput.value = "";
         pendingImage = null;
         syncComposerState();
         messageInput.focus();
+        })();
       });
 
       messageInput.addEventListener("keydown", event => {

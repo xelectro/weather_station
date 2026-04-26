@@ -104,6 +104,7 @@ pub struct ChatClientMessage {
     pub image_name: Option<String>,
     pub image_type: Option<String>,
     pub image_data: Option<String>,
+    pub image_thumb: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -114,6 +115,7 @@ pub struct ChatEvent {
     pub image_name: Option<String>,
     pub image_type: Option<String>,
     pub image_data: Option<String>,
+    pub image_thumb: Option<String>,
     pub now: String,
     pub users: Vec<String>,
 }
@@ -122,6 +124,14 @@ pub struct ChatEvent {
 pub struct ChatBootstrap {
     pub users: Vec<String>,
     pub history: Vec<ChatEvent>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ChatUploadResponse {
+    pub image_name: String,
+    pub image_type: String,
+    pub image_url: String,
+    pub thumbnail_url: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
